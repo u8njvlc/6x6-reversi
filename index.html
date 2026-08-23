@@ -63,30 +63,27 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   .cols{grid-template-columns:24px repeat(6,1fr)}.board-row{grid-template-columns:24px 1fr}
   .bottom-actions button{font-size:13px}.eval-num{font-size:11px}.status{font-size:13px}
 }
+
+.simple-score{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.stone-score{flex:1;display:flex;align-items:center;justify-content:center;gap:9px;font-weight:800;font-size:18px}
+.stone-score strong{font-size:22px}
+.one-control{grid-template-columns:1fr}
+.one-control .control-card{max-width:340px;margin:0 auto;width:100%}
+
 </style>
 </head>
 <body>
 <div class="app">
-  <section class="score-card">
-    <span class="disc-sm b"></span><span class="count" id="blackCount">2</span>
-    <div class="meter-wrap">
-      <span class="pct" id="blackPct">55%</span>
-      <div class="meter"><div class="meter-b" id="meterBlack"></div><div class="meter-w"></div></div>
-      <span class="pct" id="whitePct">45%</span>
-    </div>
-    <span class="disc-sm w"></span><span class="count" id="whiteCount">2</span>
+  <section class="score-card simple-score">
+    <div class="stone-score"><span class="disc-sm b"></span><span>黒</span><strong id="blackCount">2</strong></div>
+    <div class="stone-score"><span class="disc-sm w"></span><span>白</span><strong id="whiteCount">2</strong></div>
   </section>
 
-  <section class="top-controls">
+  <section class="top-controls one-control">
     <div class="control-card"><label>後攻:</label><div class="seg"><button id="autoBtn">自動</button><button id="manualBtn" class="on">手動</button></div></div>
-    <div class="control-card"><label>評価値:</label><div class="seg"><button id="evalOnBtn" class="on">ON</button><button id="evalOffBtn">OFF</button></div></div>
   </section>
 
-  <section class="recommend-row">
-    <span>おすすめ手:</span>
-    <button id="recommendToggle" class="on">表示中</button>
-    <span id="recommendNote" style="color:#666;font-size:13px">タップで非表示</span>
-  </section>
+  
 
   <section class="info-row">
     <div class="info-box"><b>ターン</b><strong id="turnCount">0ターン</strong></div>
@@ -104,7 +101,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
 
   <section class="bottom-actions">
     <button id="undoBtn">← 一つ前に戻る</button>
-    <button id="recommendBtn">☆ おすすめ再計算</button>
+    <button id="recommendBtn">☆ 最善手を表示</button>
     <button id="resetBtn">↻ 最初から</button>
   </section>
 
@@ -121,7 +118,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   const N=6,E=0,B=1,W=-1;
   const DIR=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
   const $=id=>document.getElementById(id);
-  let board,turn,history,lastMove,plyCount,autoWhite=false,showEval=true,showRecommend=true,recommendedKey=null,busy=false,gameOver=false;
+  let board,turn,history,lastMove,plyCount,autoWhite=false,showRecommend=true,recommendedKey=null,busy=false,gameOver=false;
   const TT=new Map();
 
   const inside=(r,c)=>r>=0&&r<N&&c>=0&&c<N;
@@ -304,19 +301,6 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     return best;
   }
 
-  function boardStrengthForBlack(){
-    // 上部%は候補評価よりも緩やかに動かす。序盤の石数差はほぼ無視。
-    if(plyCount===0)return 55;
-    TT.clear();
-    let raw=negamax(board,B,Math.min(5,depthForPosition(board)),-Infinity,Infinity);
-    const e=empties(board);
-    const damp=e>24?0.35:e>16?0.5:0.75;
-    let pct=Math.round(55 + Math.tanh(raw/55)*18*damp);
-    // 1〜2手で極端に飛ばないよう制限
-    const earlyCap=plyCount<=2?8:plyCount<=6?15:28;
-    pct=Math.max(55-earlyCap,Math.min(55+earlyCap,pct));
-    return Math.max(5,Math.min(95,pct));
-  }
 
   function onPerfectLine(){
     if(openingBook.has(boardSig(board,turn)))return true;
@@ -382,22 +366,17 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
       if(m)cell.classList.add('legal');
       if(showRecommend&&recommendedKey===k)cell.classList.add('recommended');
       if(board[r][c]===B)cell.innerHTML='<span class="stone b"></span>';
-      else if(board[r][c]===W)cell.innerHTML='<span class="stone w"></span>';
-      else if(m&&showEval){const v=oracleLikeMoveValue(m,turn);cell.innerHTML=`<span class="eval-num">${v>0?'+':''}${v}</span>`}
+      else if(board[r][c]===W)cell.innerHTML='<span class="stone w"></span>';${v}</span>`}
       cell.onclick=()=>doMove(r,c);$('board').appendChild(cell);
     }
-    const b=count(board,B),w=count(board,W),bp=boardStrengthForBlack();
-    $('blackCount').textContent=b;$('whiteCount').textContent=w;$('blackPct').textContent=bp+'%';$('whitePct').textContent=(100-bp)+'%';$('meterBlack').style.width=bp+'%';
+    const b=count(board,B),w=count(board,W);
+    $('blackCount').textContent=b;$('whiteCount').textContent=w;
     $('emptyCount').textContent=empties(board);$('turnCount').textContent=Math.floor(plyCount/2)+'ターン';$('modeText').textContent=autoWhite?'自動':'手動';
-    $('statusLine').textContent=gameOver?'ゲーム終了。結果を確認してください。':busy?'白（後攻）が考えています…':(turn===B?'黒（先攻）':'白（後攻）')+'の番です。 黄色いマスが置ける場所です。'+(onPerfectLine()?' 最善進行中。':'');
-    $('recommendToggle').textContent=showRecommend?'表示中':'非表示';$('recommendToggle').classList.toggle('on',showRecommend);$('recommendNote').textContent=showRecommend?'タップで非表示':'タップで表示';
+    $('statusLine').textContent=gameOver?'ゲーム終了。結果を確認してください。':busy?'白（後攻）が考えています…':(turn===B?'黒（先攻）':'白（後攻）')+'の番です。 ★が最善手です。'+(onPerfectLine()?' 最善進行中。':'');
   }
 
   $('manualBtn').onclick=()=>{autoWhite=false;busy=false;$('manualBtn').classList.add('on');$('autoBtn').classList.remove('on');render()};
   $('autoBtn').onclick=()=>{autoWhite=true;$('autoBtn').classList.add('on');$('manualBtn').classList.remove('on');render();if(turn===W&&!gameOver)setTimeout(aiMove,100)};
-  $('evalOnBtn').onclick=()=>{showEval=true;$('evalOnBtn').classList.add('on');$('evalOffBtn').classList.remove('on');render()};
-  $('evalOffBtn').onclick=()=>{showEval=false;$('evalOffBtn').classList.add('on');$('evalOnBtn').classList.remove('on');render()};
-  $('recommendToggle').onclick=()=>{showRecommend=!showRecommend;render()};
   $('recommendBtn').onclick=()=>{showRecommend=true;render()};
   $('undoBtn').onclick=undo;
   $('resetBtn').onclick=()=>$('resetConfirm').classList.add('show');
