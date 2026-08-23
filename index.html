@@ -21,9 +21,9 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
 .disc-sm.w{background:radial-gradient(circle at 35% 28%,#fff,#f4f4f4 58%,#cfcfcf)}
 .count{font-size:20px;font-weight:800}.pct{font-size:19px;font-weight:800;white-space:nowrap}
 .meter-wrap{display:grid;grid-template-columns:auto 1fr auto;gap:7px;align-items:center}
-.meter{height:13px;border:1px solid #bbb;background:#e8e8e8;display:flex}.meter-b{background:#202020;width:50%}.meter-w{flex:1}
+.meter{height:13px;border:1px solid #bbb;background:#e8e8e8;display:flex}.meter-b{background:#202020;width:55%}.meter-w{flex:1}
 .top-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-.control-card{background:transparent;display:flex;gap:7px;align-items:center;font-weight:750}
+.control-card{display:flex;gap:7px;align-items:center;font-weight:750}
 .control-card label{white-space:nowrap}
 .seg{display:grid;grid-template-columns:1fr 1fr;border:1.5px solid var(--purple);border-radius:10px;overflow:hidden;flex:1}
 .seg button{border:0;background:#fff;color:var(--purple);padding:10px 5px;font-weight:800}
@@ -35,7 +35,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
 .info-box{background:#fff;border:1px solid #ddd;border-radius:11px;padding:8px 6px;text-align:center}
 .info-box b{display:block;color:var(--purple);font-size:13px;margin-bottom:2px}
 .info-box strong{font-size:18px}
-.board-shell{margin-top:12px}
+.board-shell{margin-top:18px}
 .cols{display:grid;grid-template-columns:27px repeat(6,1fr);text-align:center;color:#666;font-weight:700;margin-bottom:3px}
 .board-row{display:grid;grid-template-columns:27px 1fr}
 .rows{display:grid;grid-template-rows:repeat(6,1fr);place-items:center;color:#666;font-weight:700}
@@ -53,8 +53,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
 .cell.recommended:before{content:"★";position:absolute;left:4px;top:2px;color:#127ad3;font-size:17px;font-weight:900;z-index:5}
 .bottom-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:10px}
 .bottom-actions button{border:1px solid #ddd;background:#fff;color:var(--purple);border-radius:11px;padding:11px 5px;font-weight:800}
-.status{margin-top:9px;background:#eeecff;border-radius:11px;padding:10px 12px}
-.status-main{font-weight:800}.status-sub{font-size:13px;color:var(--muted);margin-top:2px}
+.status{margin-top:8px;background:#eeecff;border-radius:11px;padding:9px 12px;font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .confirm{display:none;background:#fff;border:1px solid #ddd;border-radius:11px;padding:11px;margin-top:8px}
 .confirm.show{display:block}.confirm .buttons{display:flex;gap:7px;margin-top:8px}.confirm button{flex:1;border:0;border-radius:8px;padding:9px;font-weight:800}.danger{background:var(--danger);color:#fff}.cancel{background:#eee}
 .result{display:none;background:#fff;border:1px solid #ddd;border-radius:11px;padding:12px;margin-top:8px;text-align:center;font-weight:800}.result.show{display:block}
@@ -62,7 +61,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   .app{padding:0 8px}.score-card{padding:10px 9px}.disc-sm{width:28px;height:28px}.count{font-size:18px}.pct{font-size:17px}
   .top-controls{gap:6px}.control-card{font-size:14px}.seg button{padding:9px 4px}.recommend-row{font-size:14px}
   .cols{grid-template-columns:24px repeat(6,1fr)}.board-row{grid-template-columns:24px 1fr}
-  .bottom-actions button{font-size:13px}.eval-num{font-size:11px}
+  .bottom-actions button{font-size:13px}.eval-num{font-size:11px}.status{font-size:13px}
 }
 </style>
 </head>
@@ -71,9 +70,9 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   <section class="score-card">
     <span class="disc-sm b"></span><span class="count" id="blackCount">2</span>
     <div class="meter-wrap">
-      <span class="pct" id="blackPct">50%</span>
+      <span class="pct" id="blackPct">55%</span>
       <div class="meter"><div class="meter-b" id="meterBlack"></div><div class="meter-w"></div></div>
-      <span class="pct" id="whitePct">50%</span>
+      <span class="pct" id="whitePct">45%</span>
     </div>
     <span class="disc-sm w"></span><span class="count" id="whiteCount">2</span>
   </section>
@@ -109,140 +108,156 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     <button id="resetBtn">↻ 最初から</button>
   </section>
 
-  <section class="status">
-    <div class="status-main" id="statusMain">黒（先攻）の番です。</div>
-    <div class="status-sub" id="statusSub">黄色いマスが置ける場所です。</div>
-  </section>
-
+  <section class="status" id="statusLine">黒（先攻）の番です。 黄色いマスが置ける場所です。</section>
   <section id="resetConfirm" class="confirm">
     <b>本当に最初からやり直しますか？</b>
     <div class="buttons"><button id="cancelReset" class="cancel">キャンセル</button><button id="doReset" class="danger">最初から</button></div>
   </section>
-
   <section id="result" class="result"></section>
 </div>
 
 <script>
 (() => {
-  const N=6, E=0, B=1, W=-1;
+  const N=6,E=0,B=1,W=-1;
   const DIR=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
   const $=id=>document.getElementById(id);
-  let board, turn, history, lastMove, plyCount, autoWhite=false, showEval=true, showRecommend=true, recommendedKey=null, busy=false, gameOver=false;
+  let board,turn,history,lastMove,plyCount,autoWhite=false,showEval=true,showRecommend=true,recommendedKey=null,busy=false,gameOver=false;
+  const TT=new Map();
 
   const inside=(r,c)=>r>=0&&r<N&&c>=0&&c<N;
   function flipsFor(b,r,c,p){
-    if(!inside(r,c)||b[r][c]!==E) return [];
+    if(!inside(r,c)||b[r][c]!==E)return[];
     const out=[];
     for(const [dr,dc] of DIR){
       let rr=r+dr,cc=c+dc,tmp=[];
       while(inside(rr,cc)&&b[rr][cc]===-p){tmp.push([rr,cc]);rr+=dr;cc+=dc}
-      if(tmp.length&&inside(rr,cc)&&b[rr][cc]===p) out.push(...tmp);
+      if(tmp.length&&inside(rr,cc)&&b[rr][cc]===p)out.push(...tmp);
     }
     return out;
   }
   function legalMoves(b,p){
-    const a=[]; for(let r=0;r<N;r++)for(let c=0;c<N;c++){const f=flipsFor(b,r,c,p);if(f.length)a.push({r,c,f})}
-    return a;
+    const a=[];for(let r=0;r<N;r++)for(let c=0;c<N;c++){const f=flipsFor(b,r,c,p);if(f.length)a.push({r,c,f})}return a;
   }
-  function applyMove(b,m,p){
-    const n=b.map(row=>row.slice()); n[m.r][m.c]=p; for(const [r,c] of m.f)n[r][c]=p; return n;
-  }
+  function applyMove(b,m,p){const n=b.map(r=>r.slice());n[m.r][m.c]=p;for(const[r,c]of m.f)n[r][c]=p;return n}
   function count(b,p){let n=0;for(const row of b)for(const x of row)if(x===p)n++;return n}
-  function emptyCount(b){return 36-count(b,B)-count(b,W)}
-  function terminal(b){
-    return legalMoves(b,B).length===0 && legalMoves(b,W).length===0;
-  }
-  function positional(b,p){
-    const M=[
-      [32,-14,6,6,-14,32],
-      [-14,-18,-3,-3,-18,-14],
-      [6,-3,3,3,-3,6],
-      [6,-3,3,3,-3,6],
-      [-14,-18,-3,-3,-18,-14],
-      [32,-14,6,6,-14,32]
+  function empties(b){return 36-count(b,B)-count(b,W)}
+  function key(b,p,d){return b.flat().map(x=>x===B?'1':x===W?'2':'0').join('')+'|'+p+'|'+d}
+
+  function featureEval(b,p){
+    const pos=[
+      [60,-22,9,9,-22,60],
+      [-22,-34,-5,-5,-34,-22],
+      [9,-5,4,4,-5,9],
+      [9,-5,4,4,-5,9],
+      [-22,-34,-5,-5,-34,-22],
+      [60,-22,9,9,-22,60]
     ];
-    let s=0;
+    let positional=0,frontierP=0,frontierO=0;
     for(let r=0;r<N;r++)for(let c=0;c<N;c++){
-      if(b[r][c]===p)s+=M[r][c];
-      else if(b[r][c]===-p)s-=M[r][c];
+      if(b[r][c]===p)positional+=pos[r][c];
+      else if(b[r][c]===-p)positional-=pos[r][c];
+      if(b[r][c]!==E){
+        let frontier=false;
+        for(const[dr,dc]of DIR){const rr=r+dr,cc=c+dc;if(inside(rr,cc)&&b[rr][cc]===E){frontier=true;break}}
+        if(frontier){if(b[r][c]===p)frontierP++;else if(b[r][c]===-p)frontierO++}
+      }
     }
-    return s;
+    const my=legalMoves(b,p).length,op=legalMoves(b,-p).length;
+    const mobility=(my-op)*10;
+    const frontier=(frontierO-frontierP)*3;
+    const disc=(count(b,p)-count(b,-p))*0.35;
+    return positional+mobility+frontier+disc;
   }
-  function heuristic(b,p){
-    const mobility=(legalMoves(b,p).length-legalMoves(b,-p).length)*6;
-    const discs=(count(b,p)-count(b,-p))*0.6;
-    return positional(b,p)+mobility+discs;
+
+  function orderMoves(moves){
+    const score=m=>{
+      let s=m.f.length*3;
+      if((m.r===0||m.r===5)&&(m.c===0||m.c===5))s+=1000;
+      if((m.r===1||m.r===4)&&(m.c===1||m.c===4))s-=180;
+      if((m.r===0||m.r===5)&&(m.c===1||m.c===4))s-=45;
+      if((m.c===0||m.c===5)&&(m.r===1||m.r===4))s-=45;
+      return s;
+    };
+    return moves.slice().sort((a,b)=>score(b)-score(a));
   }
-  function ordered(moves){
-    return moves.slice().sort((a,b)=>{
-      const v=m=>(((m.r===0||m.r===5)&&(m.c===0||m.c===5))?1000:0)+m.f.length*4-(((m.r===1||m.r===4)&&(m.c===1||m.c===4))?120:0);
-      return v(b)-v(a);
-    });
-  }
+
   function negamax(b,p,depth,alpha,beta){
-    const moves=legalMoves(b,p), opp=legalMoves(b,-p);
-    if(!moves.length&&!opp.length) return (count(b,p)-count(b,-p))*1000;
-    if(depth<=0) return heuristic(b,p);
-    if(!moves.length) return -negamax(b,-p,depth-1,-beta,-alpha);
+    const k=key(b,p,depth);
+    if(TT.has(k))return TT.get(k);
+    const moves=legalMoves(b,p),opp=legalMoves(b,-p);
+    if(!moves.length&&!opp.length){
+      const v=(count(b,p)-count(b,-p))*1000;
+      TT.set(k,v);return v;
+    }
+    if(depth<=0){const v=featureEval(b,p);TT.set(k,v);return v}
+    if(!moves.length)return -negamax(b,-p,depth-1,-beta,-alpha);
     let best=-Infinity;
-    for(const m of ordered(moves)){
+    for(const m of orderMoves(moves)){
       const v=-negamax(applyMove(b,m,p),-p,depth-1,-beta,-alpha);
       if(v>best)best=v;if(best>alpha)alpha=best;if(alpha>=beta)break;
     }
-    return best;
+    TT.set(k,best);return best;
   }
-  function searchDepth(){
-    const e=emptyCount(board);
+
+  function depthForPosition(b){
+    const e=empties(b);
     if(e<=10)return e+2;
     if(e<=18)return 7;
+    if(e<=26)return 6;
     return 5;
   }
-  function moveEvaluation(m,p){
-    // 「その手を打った後」の先読み評価
-    // 初期局面は元サイト同様、対称4手を -4 と表示
-    if(plyCount===0 && count(board,B)===2 && count(board,W)===2) return -4;
-    const nb=applyMove(board,m,p), d=searchDepth();
-    const raw=-negamax(nb,-p,d-1,-Infinity,Infinity);
-    // 表示を扱いやすい小さな整数スケールへ
-    return Math.max(-99,Math.min(99,Math.round(raw/8)));
+
+  function oracleLikeMoveValue(m,p){
+    if(plyCount===0 && count(board,B)===2 && count(board,W)===2)return -4;
+    TT.clear();
+    const nb=applyMove(board,m,p);
+    const raw=-negamax(nb,-p,depthForPosition(nb)-1,-Infinity,Infinity);
+    // 元サイトの序盤評価に近い幅へ圧縮
+    let v=Math.round(raw/6);
+    if(empties(nb)>24)v=Math.round(v*0.72);
+    return Math.max(-40,Math.min(40,v));
   }
-  function bestMoveForDisplay(){
+
+  function bestMove(){
     const moves=legalMoves(board,turn);
     if(!moves.length)return null;
-    // 初期のおすすめはユーザー指定の D5
-    if(plyCount===0 && turn===B){
+    if(plyCount===0&&turn===B){
       const d5=moves.find(m=>m.r===4&&m.c===3);
       if(d5)return d5;
     }
-    let best=moves[0],bestVal=-Infinity;
+    let best=moves[0],bestV=-Infinity;
     for(const m of moves){
-      const v=moveEvaluation(m,turn);
-      if(v>bestVal){bestVal=v;best=m}
+      const v=oracleLikeMoveValue(m,turn);
+      if(v>bestV){bestV=v;best=m}
     }
     return best;
   }
-  function winPct(){
-    if(gameOver){
-      const b=count(board,B),w=count(board,W),tot=b+w;
-      return tot?Math.round(b/tot*100):50;
-    }
-    const raw=negamax(board,B,Math.min(4,searchDepth()),-Infinity,Infinity);
-    return Math.max(1,Math.min(99,Math.round(50+40*Math.tanh(raw/18))));
+
+  function boardStrengthForBlack(){
+    // 上部%は候補評価よりも緩やかに動かす。序盤の石数差はほぼ無視。
+    if(plyCount===0)return 55;
+    TT.clear();
+    let raw=negamax(board,B,Math.min(5,depthForPosition(board)),-Infinity,Infinity);
+    const e=empties(board);
+    const damp=e>24?0.35:e>16?0.5:0.75;
+    let pct=Math.round(55 + Math.tanh(raw/55)*18*damp);
+    // 1〜2手で極端に飛ばないよう制限
+    const earlyCap=plyCount<=2?8:plyCount<=6?15:28;
+    pct=Math.max(55-earlyCap,Math.min(55+earlyCap,pct));
+    return Math.max(5,Math.min(95,pct));
   }
-  function saveState(){
-    history.push({board:board.map(r=>r.slice()),turn,lastMove:lastMove&&{...lastMove},plyCount,gameOver});
-  }
+
+  function save(){history.push({board:board.map(r=>r.slice()),turn,lastMove:lastMove&&{...lastMove},plyCount,gameOver})}
   function init(){
     board=Array.from({length:N},()=>Array(N).fill(E));
     board[2][2]=W;board[2][3]=B;board[3][2]=B;board[3][3]=W;
     turn=B;history=[];lastMove=null;plyCount=0;busy=false;gameOver=false;recommendedKey=null;
-    $('result').classList.remove('show');$('resetConfirm').classList.remove('show');
-    render();
+    $('result').classList.remove('show');$('resetConfirm').classList.remove('show');render();
   }
   function doMove(r,c){
     if(busy||gameOver||(turn===W&&autoWhite))return;
-    const f=flipsFor(board,r,c,turn); if(!f.length)return;
-    saveState();board=applyMove(board,{r,c,f},turn);lastMove={r,c,p:turn};plyCount++;turn=-turn;afterMove();
+    const f=flipsFor(board,r,c,turn);if(!f.length)return;
+    save();board=applyMove(board,{r,c,f},turn);lastMove={r,c,p:turn};plyCount++;turn=-turn;afterMove();
   }
   function afterMove(){
     let moves=legalMoves(board,turn);
@@ -256,16 +271,12 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   }
   function aiMove(){
     if(gameOver||turn!==W||!autoWhite)return;
-    const moves=legalMoves(board,W);
-    if(!moves.length){afterMove();return}
+    const moves=legalMoves(board,W);if(!moves.length){afterMove();return}
     busy=true;render();
     setTimeout(()=>{
-      let best=moves[0],bestVal=-Infinity;
-      for(const m of moves){
-        const v=moveEvaluation(m,W);
-        if(v>bestVal){bestVal=v;best=m}
-      }
-      saveState();board=applyMove(board,best,W);lastMove={r:best.r,c:best.c,p:W};plyCount++;turn=B;busy=false;afterMove();
+      let best=moves[0],bestV=-Infinity;
+      for(const m of moves){const v=oracleLikeMoveValue(m,W);if(v>bestV){bestV=v;best=m}}
+      save();board=applyMove(board,best,W);lastMove={r:best.r,c:best.c,p:W};plyCount++;turn=B;busy=false;afterMove();
     },120);
   }
   function finish(){
@@ -276,17 +287,13 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   }
   function undo(){
     if(!history.length||busy)return;
-    const s=history.pop();
-    board=s.board.map(r=>r.slice());turn=s.turn;lastMove=s.lastMove;plyCount=s.plyCount;gameOver=s.gameOver;
+    const s=history.pop();board=s.board.map(r=>r.slice());turn=s.turn;lastMove=s.lastMove;plyCount=s.plyCount;gameOver=s.gameOver;
     $('result').classList.toggle('show',gameOver);render();
   }
   function render(){
     const moves=gameOver||busy?[]:legalMoves(board,turn);
     const map=new Map(moves.map(m=>[m.r+','+m.c,m]));
-    if(showRecommend&&!gameOver&&!busy){
-      const bm=bestMoveForDisplay();recommendedKey=bm?bm.r+','+bm.c:null;
-    }else recommendedKey=null;
-
+    if(showRecommend&&!gameOver&&!busy){const bm=bestMove();recommendedKey=bm?bm.r+','+bm.c:null}else recommendedKey=null;
     $('board').innerHTML='';
     for(let r=0;r<N;r++)for(let c=0;c<N;c++){
       const cell=document.createElement('button');cell.className='cell';
@@ -297,27 +304,14 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
       if(showRecommend&&recommendedKey===k)cell.classList.add('recommended');
       if(board[r][c]===B)cell.innerHTML='<span class="stone b"></span>';
       else if(board[r][c]===W)cell.innerHTML='<span class="stone w"></span>';
-      else if(m&&showEval){
-        const v=moveEvaluation(m,turn);
-        cell.innerHTML=`<span class="eval-num">${v>0?'+':''}${v}</span>`;
-      }
+      else if(m&&showEval){const v=oracleLikeMoveValue(m,turn);cell.innerHTML=`<span class="eval-num">${v>0?'+':''}${v}</span>`}
       cell.onclick=()=>doMove(r,c);$('board').appendChild(cell);
     }
-
-    const b=count(board,B),w=count(board,W),bp=winPct();
-    $('blackCount').textContent=b;$('whiteCount').textContent=w;
-    $('blackPct').textContent=bp+'%';$('whitePct').textContent=(100-bp)+'%';$('meterBlack').style.width=bp+'%';
-    $('emptyCount').textContent=emptyCount(board);
-    $('turnCount').textContent=Math.floor(plyCount/2)+'ターン';
-    $('modeText').textContent=autoWhite?'自動':'手動';
-
-    if(gameOver){$('statusMain').textContent='ゲーム終了';$('statusSub').textContent='結果を確認してください。'}
-    else if(busy){$('statusMain').textContent='白（後攻）が考えています…';$('statusSub').textContent='少しお待ちください。'}
-    else{$('statusMain').textContent=(turn===B?'黒（先攻）':'白（後攻）')+'の番です。';$('statusSub').textContent='黄色いマスが置ける場所です。'}
-
-    $('recommendToggle').textContent=showRecommend?'表示中':'非表示';
-    $('recommendToggle').classList.toggle('on',showRecommend);
-    $('recommendNote').textContent=showRecommend?'タップで非表示':'タップで表示';
+    const b=count(board,B),w=count(board,W),bp=boardStrengthForBlack();
+    $('blackCount').textContent=b;$('whiteCount').textContent=w;$('blackPct').textContent=bp+'%';$('whitePct').textContent=(100-bp)+'%';$('meterBlack').style.width=bp+'%';
+    $('emptyCount').textContent=empties(board);$('turnCount').textContent=Math.floor(plyCount/2)+'ターン';$('modeText').textContent=autoWhite?'自動':'手動';
+    $('statusLine').textContent=gameOver?'ゲーム終了。結果を確認してください。':busy?'白（後攻）が考えています…':(turn===B?'黒（先攻）':'白（後攻）')+'の番です。 黄色いマスが置ける場所です。';
+    $('recommendToggle').textContent=showRecommend?'表示中':'非表示';$('recommendToggle').classList.toggle('on',showRecommend);$('recommendNote').textContent=showRecommend?'タップで非表示':'タップで表示';
   }
 
   $('manualBtn').onclick=()=>{autoWhite=false;busy=false;$('manualBtn').classList.add('on');$('autoBtn').classList.remove('on');render()};
@@ -330,7 +324,6 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   $('resetBtn').onclick=()=>$('resetConfirm').classList.add('show');
   $('cancelReset').onclick=()=>$('resetConfirm').classList.remove('show');
   $('doReset').onclick=init;
-
   init();
 })();
 </script>
