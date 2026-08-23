@@ -12,6 +12,7 @@
   --hint:#fff28a; --hint2:#fff7b0; --last:#2081ff; --rec:#16a0ff; --danger:#d93025;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+button,.cell,.seg,.bottom-actions,.board{touch-action:manipulation}
 html,body{margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text)}
 body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-bottom))}
 .app{max-width:680px;margin:0 auto;padding:0 10px}
@@ -437,6 +438,15 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   $('resetBtn').onclick=()=>$('resetConfirm').classList.add('show');
   $('cancelReset').onclick=()=>$('resetConfirm').classList.remove('show');
   $('doReset').onclick=init;
+
+  // iPhone Safariのダブルタップ拡大を抑止
+  let lastTouchEnd=0;
+  document.addEventListener('touchend',e=>{
+    const now=Date.now();
+    if(now-lastTouchEnd<=300)e.preventDefault();
+    lastTouchEnd=now;
+  },{passive:false});
+
   init();
 })();
 </script>
