@@ -369,28 +369,70 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   function render(){
     const moves=gameOver||busy?[]:legalMoves(board,turn);
     const map=new Map(moves.map(m=>[m.r+','+m.c,m]));
-    if(showRecommend&&!gameOver&&!busy){const bm=bestMove();recommendedKey=bm?bm.r+','+bm.c:null}else recommendedKey=null;
+
+    if(showRecommend&&!gameOver&&!busy){
+      const bm=bestMove();
+      recommendedKey=bm?bm.r+','+bm.c:null;
+    }else{
+      recommendedKey=null;
+    }
+
     $('board').innerHTML='';
+
     for(let r=0;r<N;r++)for(let c=0;c<N;c++){
-      const cell=document.createElement('button');cell.className='cell';
+      const cell=document.createElement('button');
+      cell.className='cell';
+
       if((r===0||r===5)&&(c===0||c===5))cell.classList.add('corner');
       if(lastMove&&lastMove.r===r&&lastMove.c===c)cell.classList.add('last');
-      const k=r+','+c,m=map.get(k);
+
+      const k=r+','+c;
+      const m=map.get(k);
+
       if(m)cell.classList.add('legal');
       if(showRecommend&&recommendedKey===k)cell.classList.add('recommended');
+
       if(board[r][c]===B)cell.innerHTML='<span class="stone b"></span>';
       else if(board[r][c]===W)cell.innerHTML='<span class="stone w"></span>';
-      cell.onclick=()=>doMove(r,c);$('board').appendChild(cell);
+
+      cell.onclick=()=>doMove(r,c);
+      $('board').appendChild(cell);
     }
+
     const b=count(board,B),w=count(board,W);
-    $('blackCount').textContent=b;$('whiteCount').textContent=w;
-    $('emptyCount').textContent=empties(board);$('turnCount').textContent=Math.floor(plyCount/2)+'ターン';$('modeText').textContent=autoWhite?'自動':'手動';
-    $('statusLine').textContent=gameOver?'ゲーム終了。結果を確認してください。':busy?'白（後攻）が考えています…':(turn===B?'黒（先攻）':'白（後攻）')+'の番です。 ★が最善手です。'+(onPerfectLine()?' 最善進行中。':'');$('recommendToggle').classList.toggle('on',showRecommend);$('recommendNote').textContent=showRecommend?'タップで非表示':'タップで表示';
+    $('blackCount').textContent=b;
+    $('whiteCount').textContent=w;
+    $('emptyCount').textContent=empties(board);
+    $('turnCount').textContent=Math.floor(plyCount/2)+'ターン';
+    $('modeText').textContent=autoWhite?'自動':'手動';
+
+    $('statusLine').textContent=
+      gameOver?'ゲーム終了。結果を確認してください。':
+      busy?'白（後攻）が考えています…':
+      (turn===B?'黒（先攻）':'白（後攻）')+'の番です。 ★が最善手です。'+(onPerfectLine()?' 最善進行中。':'');
   }
 
-  $('manualBtn').onclick=()=>{autoWhite=false;busy=false;$('manualBtn').classList.add('on');$('autoBtn').classList.remove('on');render()};
-  $('autoBtn').onclick=()=>{autoWhite=true;$('autoBtn').classList.add('on');$('manualBtn').classList.remove('on');render();if(turn===W&&!gameOver)setTimeout(aiMove,100)};$('evalOnBtn').classList.add('on');$('evalOffBtn').classList.remove('on');render()};$('evalOffBtn').classList.add('on');$('evalOnBtn').classList.remove('on');render()};render()};
-  $('recommendBtn').onclick=()=>{showRecommend=true;render()};
+  $('manualBtn').onclick=()=>{
+    autoWhite=false;
+    busy=false;
+    $('manualBtn').classList.add('on');
+    $('autoBtn').classList.remove('on');
+    render();
+  };
+
+  $('autoBtn').onclick=()=>{
+    autoWhite=true;
+    $('autoBtn').classList.add('on');
+    $('manualBtn').classList.remove('on');
+    render();
+    if(turn===W&&!gameOver)setTimeout(aiMove,100);
+  };
+
+  $('recommendBtn').onclick=()=>{
+    showRecommend=true;
+    render();
+  };
+
   $('undoBtn').onclick=undo;
   $('resetBtn').onclick=()=>$('resetConfirm').classList.add('show');
   $('cancelReset').onclick=()=>$('resetConfirm').classList.remove('show');
