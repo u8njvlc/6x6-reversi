@@ -301,6 +301,19 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     return best;
   }
 
+  function boardStrengthForBlack(){
+    // 上部%は候補評価よりも緩やかに動かす。序盤の石数差はほぼ無視。
+    if(plyCount===0)return 55;
+    TT.clear();
+    let raw=negamax(board,B,Math.min(5,depthForPosition(board)),-Infinity,Infinity);
+    const e=empties(board);
+    const damp=e>24?0.35:e>16?0.5:0.75;
+    let pct=Math.round(55 + Math.tanh(raw/55)*18*damp);
+    // 1〜2手で極端に飛ばないよう制限
+    const earlyCap=plyCount<=2?8:plyCount<=6?15:28;
+    pct=Math.max(55-earlyCap,Math.min(55+earlyCap,pct));
+    return Math.max(5,Math.min(95,pct));
+  }
 
   function onPerfectLine(){
     if(openingBook.has(boardSig(board,turn)))return true;
@@ -366,17 +379,17 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
       if(m)cell.classList.add('legal');
       if(showRecommend&&recommendedKey===k)cell.classList.add('recommended');
       if(board[r][c]===B)cell.innerHTML='<span class="stone b"></span>';
-      else if(board[r][c]===W)cell.innerHTML='<span class="stone w"></span>';${v}</span>`}
+      else if(board[r][c]===W)cell.innerHTML='<span class="stone w"></span>';
       cell.onclick=()=>doMove(r,c);$('board').appendChild(cell);
     }
     const b=count(board,B),w=count(board,W);
     $('blackCount').textContent=b;$('whiteCount').textContent=w;
     $('emptyCount').textContent=empties(board);$('turnCount').textContent=Math.floor(plyCount/2)+'ターン';$('modeText').textContent=autoWhite?'自動':'手動';
-    $('statusLine').textContent=gameOver?'ゲーム終了。結果を確認してください。':busy?'白（後攻）が考えています…':(turn===B?'黒（先攻）':'白（後攻）')+'の番です。 ★が最善手です。'+(onPerfectLine()?' 最善進行中。':'');
+    $('statusLine').textContent=gameOver?'ゲーム終了。結果を確認してください。':busy?'白（後攻）が考えています…':(turn===B?'黒（先攻）':'白（後攻）')+'の番です。 ★が最善手です。'+(onPerfectLine()?' 最善進行中。':'');$('recommendToggle').classList.toggle('on',showRecommend);$('recommendNote').textContent=showRecommend?'タップで非表示':'タップで表示';
   }
 
   $('manualBtn').onclick=()=>{autoWhite=false;busy=false;$('manualBtn').classList.add('on');$('autoBtn').classList.remove('on');render()};
-  $('autoBtn').onclick=()=>{autoWhite=true;$('autoBtn').classList.add('on');$('manualBtn').classList.remove('on');render();if(turn===W&&!gameOver)setTimeout(aiMove,100)};
+  $('autoBtn').onclick=()=>{autoWhite=true;$('autoBtn').classList.add('on');$('manualBtn').classList.remove('on');render();if(turn===W&&!gameOver)setTimeout(aiMove,100)};$('evalOnBtn').classList.add('on');$('evalOffBtn').classList.remove('on');render()};$('evalOffBtn').classList.add('on');$('evalOnBtn').classList.remove('on');render()};render()};
   $('recommendBtn').onclick=()=>{showRecommend=true;render()};
   $('undoBtn').onclick=undo;
   $('resetBtn').onclick=()=>$('resetConfirm').classList.add('show');
