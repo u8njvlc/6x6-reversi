@@ -201,14 +201,23 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
 
   function depthForPosition(b){
     const e=empties(b);
-    if(e<=10)return e+2;
-    if(e<=18)return 7;
-    if(e<=26)return 6;
-    return 5;
+    if(e<=11)return e+2;
+    if(e<=18)return 8;
+    if(e<=26)return 7;
+    return 6;
   }
 
   function oracleLikeMoveValue(m,p){
     if(plyCount===0 && count(board,B)===2 && count(board,W)===2)return -4;
+    const bk=bookMove();
+    if(bk && bk.r===m.r && bk.c===m.c){
+      TT.clear();
+      const nb=applyMove(board,m,p);
+      const raw=-negamax(nb,-p,depthForPosition(nb)-1,-Infinity,Infinity);
+      let v=Math.round(raw/7);
+      if(empties(nb)>24)v=Math.round(v*0.65);
+      return Math.max(-40,Math.min(40,v));
+    }
     TT.clear();
     const nb=applyMove(board,m,p);
     const raw=-negamax(nb,-p,depthForPosition(nb)-1,-Infinity,Infinity);
@@ -218,9 +227,64 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     return Math.max(-40,Math.min(40,v));
   }
 
+  // 元サイト寄りの序盤ブック。
+  // 盤の対称性を正規化して、ユーザー確認済みの D6 -> E3 -> D2 を含む。
+  function symRC(r,c,t){
+    switch(t){
+      case 0:return [r,c];
+      case 1:return [c,N-1-r];
+      case 2:return [N-1-r,N-1-c];
+      case 3:return [N-1-c,r];
+      case 4:return [r,N-1-c];
+      case 5:return [N-1-r,c];
+      case 6:return [c,r];
+      default:return [N-1-c,N-1-r];
+    }
+  }
+  function transformedBoard(b,t){
+    const n=Array.from({length:N},()=>Array(N).fill(E));
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++){const [rr,cc]=symRC(r,c,t);n[rr][cc]=b[r][c]}
+    return n;
+  }
+  function boardSig(b,p){return b.flat().join(',')+'|'+p}
+  const openingBook=new Map();
+  function addBookLine(coords){
+    let b=Array.from({length:N},()=>Array(N).fill(E));
+    b[2][2]=W;b[2][3]=B;b[3][2]=B;b[3][3]=W;
+    let p=B;
+    for(const [r,c] of coords){
+      const f=flipsFor(b,r,c,p); if(!f.length) return;
+      openingBook.set(boardSig(b,p),[r,c]);
+      b=applyMove(b,{r,c,f},p); p=-p;
+      if(!legalMoves(b,p).length&&legalMoves(b,-p).length)p=-p;
+    }
+  }
+  // D6 -> E3 -> D2（ユーザー確認済み最善ライン）
+  addBookLine([[5,3],[2,4],[1,3]]);
+
+  function bookMove(){
+    // 8対称を調べ、ブック局面なら元座標へ戻す
+    for(let t=0;t<8;t++){
+      const tb=transformedBoard(board,t), hit=openingBook.get(boardSig(tb,turn));
+      if(hit){
+        // hit を逆変換。8種なので総当たりで安全に戻す。
+        for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+          const [rr,cc]=symRC(r,c,t);
+          if(rr===hit[0]&&cc===hit[1]){
+            const f=flipsFor(board,r,c,turn);
+            if(f.length)return {r,c,f};
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   function bestMove(){
     const moves=legalMoves(board,turn);
     if(!moves.length)return null;
+    const bm=bookMove();
+    if(bm)return bm;
     if(plyCount===0&&turn===B){
       const d5=moves.find(m=>m.r===4&&m.c===3);
       if(d5)return d5;
