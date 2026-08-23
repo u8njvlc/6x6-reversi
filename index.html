@@ -143,92 +143,193 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   function empties(b){return 36-count(b,B)-count(b,W)}
   function key(b,p,d){return b.flat().map(x=>x===B?'1':x===W?'2':'0').join('')+'|'+p+'|'+d}
 
-  function featureEval(b,p){
-    const pos=[
-      [60,-22,9,9,-22,60],
-      [-22,-34,-5,-5,-34,-22],
-      [9,-5,4,4,-5,9],
-      [9,-5,4,4,-5,9],
-      [-22,-34,-5,-5,-34,-22],
-      [60,-22,9,9,-22,60]
-    ];
-    let positional=0,frontierP=0,frontierO=0;
-    for(let r=0;r<N;r++)for(let c=0;c<N;c++){
-      if(b[r][c]===p)positional+=pos[r][c];
-      else if(b[r][c]===-p)positional-=pos[r][c];
-      if(b[r][c]!==E){
-        let frontier=false;
-        for(const[dr,dc]of DIR){const rr=r+dr,cc=c+dc;if(inside(rr,cc)&&b[rr][cc]===E){frontier=true;break}}
-        if(frontier){if(b[r][c]===p)frontierP++;else if(b[r][c]===-p)frontierO++}
+  // ===== 強化版探索エンジン =====
+  const SEARCH_TT = new Map();
+  const INF = 10**9;
+
+  function stableEdgeCount(b,p){
+    let n=0;
+    const corners=[[0,0],[0,5],[5,0],[5,5]];
+    for(const [cr,cc] of corners){
+      if(b[cr][cc]!==p)continue;
+      n++;
+      const rs=cr===0?1:-1, cs=cc===0?1:-1;
+      for(let k=1;k<N;k++){
+        const c=cc+k*cs;
+        if(c<0||c>=N||b[cr][c]!==p)break;
+        n++;
+      }
+      for(let k=1;k<N;k++){
+        const r=cr+k*rs;
+        if(r<0||r>=N||b[r][cc]!==p)break;
+        n++;
       }
     }
-    const my=legalMoves(b,p).length,op=legalMoves(b,-p).length;
-    const mobility=(my-op)*10;
-    const frontier=(frontierO-frontierP)*3;
-    const disc=(count(b,p)-count(b,-p))*0.35;
-    return positional+mobility+frontier+disc;
+    return n;
   }
 
-  function orderMoves(moves){
-    const score=m=>{
-      let s=m.f.length*3;
-      if((m.r===0||m.r===5)&&(m.c===0||m.c===5))s+=1000;
-      if((m.r===1||m.r===4)&&(m.c===1||m.c===4))s-=180;
-      if((m.r===0||m.r===5)&&(m.c===1||m.c===4))s-=45;
-      if((m.c===0||m.c===5)&&(m.r===1||m.r===4))s-=45;
-      return s;
-    };
-    return moves.slice().sort((a,b)=>score(b)-score(a));
-  }
-
-  function negamax(b,p,depth,alpha,beta){
-    const k=key(b,p,depth);
-    if(TT.has(k))return TT.get(k);
-    const moves=legalMoves(b,p),opp=legalMoves(b,-p);
-    if(!moves.length&&!opp.length){
-      const v=(count(b,p)-count(b,-p))*1000;
-      TT.set(k,v);return v;
+  function potentialMobility(b,p){
+    let n=0;
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+      if(b[r][c]!==E)continue;
+      for(const[dr,dc]of DIR){
+        const rr=r+dr,cc=c+dc;
+        if(inside(rr,cc)&&b[rr][cc]===-p){n++;break}
+      }
     }
-    if(depth<=0){const v=featureEval(b,p);TT.set(k,v);return v}
-    if(!moves.length)return -negamax(b,-p,depth-1,-beta,-alpha);
-    let best=-Infinity;
-    for(const m of orderMoves(moves)){
-      const v=-negamax(applyMove(b,m,p),-p,depth-1,-beta,-alpha);
-      if(v>best)best=v;if(best>alpha)alpha=best;if(alpha>=beta)break;
-    }
-    TT.set(k,best);return best;
+    return n;
   }
 
-  function depthForPosition(b){
+  function frontierCount(b,p){
+    let n=0;
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+      if(b[r][c]!==p)continue;
+      for(const[dr,dc]of DIR){
+        const rr=r+dr,cc=c+dc;
+        if(inside(rr,cc)&&b[rr][cc]===E){n++;break}
+      }
+    }
+    return n;
+  }
+
+  function heuristicBlack(b){
+    const e=empties(b), phase=36-e;
+    const P=[
+      [80,-28,10,10,-28,80],
+      [-28,-42,-7,-7,-42,-28],
+      [10,-7,4,4,-7,10],
+      [10,-7,4,4,-7,10],
+      [-28,-42,-7,-7,-42,-28],
+      [80,-28,10,10,-28,80]
+    ];
+    let pos=0;
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+      if(b[r][c]===B)pos+=P[r][c];
+      else if(b[r][c]===W)pos-=P[r][c];
+    }
+    const mobB=legalMoves(b,B).length, mobW=legalMoves(b,W).length;
+    const pmB=potentialMobility(b,B), pmW=potentialMobility(b,W);
+    const frB=frontierCount(b,B), frW=frontierCount(b,W);
+    const stB=stableEdgeCount(b,B), stW=stableEdgeCount(b,W);
+    const discs=count(b,B)-count(b,W);
+
+    const mobility=(mobB-mobW)*(phase<18?15:phase<26?11:6);
+    const potential=(pmB-pmW)*(phase<18?4:2);
+    const frontier=(frW-frB)*(phase<24?5:2);
+    const stable=(stB-stW)*(phase<24?10:18);
+    const discWeight=phase<16?0.15:phase<26?0.8:3.5;
+    const parity=(e%2===1?1:-1)*(phase>24?2:0);
+    return pos+mobility+potential+frontier+stable+discs*discWeight+parity;
+  }
+
+  function ttKey(b,p){
+    return b.flat().map(x=>x===B?'1':x===W?'2':'0').join('')+'|'+p;
+  }
+
+  function staticMoveOrderScore(b,m,p){
+    let s=0;
+    if((m.r===0||m.r===5)&&(m.c===0||m.c===5))s+=100000;
+    if((m.r===1||m.r===4)&&(m.c===1||m.c===4))s-=12000;
+    if(((m.r===0||m.r===5)&&(m.c===1||m.c===4))||
+       ((m.c===0||m.c===5)&&(m.r===1||m.r===4)))s-=3500;
+
+    const nb=applyMove(b,m,p);
+    const opp=legalMoves(nb,-p).length;
+    const mine=legalMoves(nb,p).length;
+    s += (12-opp)*260 + mine*35 + m.f.length*8;
+
+    const oppMoves=legalMoves(nb,-p);
+    for(const om of oppMoves){
+      if((om.r===0||om.r===5)&&(om.c===0||om.c===5)){s-=18000;break}
+    }
+    return s;
+  }
+
+  function orderedMovesStrong(b,moves,p,ttBest){
+    return moves.slice().sort((a,bm)=>{
+      const ak=a.r+','+a.c, bk=bm.r+','+bm.c;
+      if(ttBest===ak)return -1;
+      if(ttBest===bk)return 1;
+      return staticMoveOrderScore(b,bm,p)-staticMoveOrderScore(b,a,p);
+    });
+  }
+
+  function pvsBlack(b,p,depth,alpha,beta){
+    const moves=legalMoves(b,p), oppMoves=legalMoves(b,-p);
+
+    if(!moves.length&&!oppMoves.length){
+      return (count(b,B)-count(b,W))*1000;
+    }
+    if(depth<=0)return heuristicBlack(b);
+    if(!moves.length)return pvsBlack(b,-p,depth,alpha,beta);
+
+    const k=ttKey(b,p), old=SEARCH_TT.get(k);
+    const alpha0=alpha, beta0=beta;
+    if(old&&old.depth>=depth){
+      if(old.flag==='EXACT')return old.value;
+      if(old.flag==='LOWER')alpha=Math.max(alpha,old.value);
+      else if(old.flag==='UPPER')beta=Math.min(beta,old.value);
+      if(alpha>=beta)return old.value;
+    }
+
+    const ordered=orderedMovesStrong(b,moves,p,old?.best);
+    let best=p===B?-INF:INF, bestMoveKey=null, first=true;
+
+    for(const m of ordered){
+      const nb=applyMove(b,m,p);
+      let v;
+      if(first){
+        v=pvsBlack(nb,-p,depth-1,alpha,beta);
+        first=false;
+      }else if(p===B){
+        v=pvsBlack(nb,-p,depth-1,alpha,alpha+1);
+        if(v>alpha&&v<beta)v=pvsBlack(nb,-p,depth-1,alpha,beta);
+      }else{
+        v=pvsBlack(nb,-p,depth-1,beta-1,beta);
+        if(v<beta&&v>alpha)v=pvsBlack(nb,-p,depth-1,alpha,beta);
+      }
+
+      if(p===B){
+        if(v>best){best=v;bestMoveKey=m.r+','+m.c}
+        if(best>alpha)alpha=best;
+      }else{
+        if(v<best){best=v;bestMoveKey=m.r+','+m.c}
+        if(best<beta)beta=best;
+      }
+      if(alpha>=beta)break;
+    }
+
+    let flag='EXACT';
+    if(best<=alpha0)flag='UPPER';
+    else if(best>=beta0)flag='LOWER';
+    SEARCH_TT.set(k,{depth,value:best,flag,best:bestMoveKey});
+    return best;
+  }
+
+  function searchDepthFor(b){
     const e=empties(b);
-    if(e<=11)return e+2;
-    if(e<=18)return 8;
-    if(e<=26)return 7;
-    return 6;
+    if(e<=13)return e;   // 終盤完全読み
+    if(e<=18)return 10;
+    if(e<=24)return 9;
+    if(e<=28)return 8;
+    return 7;
   }
 
-  function oracleLikeMoveValue(m,p){
-    if(plyCount===0 && count(board,B)===2 && count(board,W)===2)return -4;
-    const bk=bookMove();
-    if(bk && bk.r===m.r && bk.c===m.c){
-      TT.clear();
-      const nb=applyMove(board,m,p);
-      const raw=-negamax(nb,-p,depthForPosition(nb)-1,-Infinity,Infinity);
-      let v=Math.round(raw/7);
-      if(empties(nb)>24)v=Math.round(v*0.65);
-      return Math.max(-40,Math.min(40,v));
-    }
-    TT.clear();
+  function rawMoveBlackValue(m,p){
     const nb=applyMove(board,m,p);
-    const raw=-negamax(nb,-p,depthForPosition(nb)-1,-Infinity,Infinity);
-    // 元サイトの序盤評価に近い幅へ圧縮
-    let v=Math.round(raw/6);
-    if(empties(nb)>24)v=Math.round(v*0.72);
-    return Math.max(-40,Math.min(40,v));
+    SEARCH_TT.clear();
+    return pvsBlack(nb,-p,searchDepthFor(nb)-1,-INF,INF);
   }
 
-  // 元サイト寄りの序盤ブック。
-  // 盤の対称性を正規化して、ユーザー確認済みの D6 -> E3 -> D2 を含む。
+  function displayMoveValue(m,p){
+    if(plyCount===0&&count(board,B)===2&&count(board,W)===2)return -4;
+    const raw=rawMoveBlackValue(m,p);
+    if(Math.abs(raw)>=1000)return Math.round(raw/1000);
+    const e=empties(board);
+    const scale=e>26?14:e>20?11:e>14?8:5;
+    return Math.max(-36,Math.min(36,Math.round(raw/scale)));
+  }
+
   function symRC(r,c,t){
     switch(t){
       case 0:return [r,c];
@@ -243,37 +344,42 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   }
   function transformedBoard(b,t){
     const n=Array.from({length:N},()=>Array(N).fill(E));
-    for(let r=0;r<N;r++)for(let c=0;c<N;c++){const [rr,cc]=symRC(r,c,t);n[rr][cc]=b[r][c]}
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+      const [rr,cc]=symRC(r,c,t);n[rr][cc]=b[r][c];
+    }
     return n;
   }
   function boardSig(b,p){return b.flat().join(',')+'|'+p}
+
   const openingBook=new Map();
   function addBookLine(coords){
     let b=Array.from({length:N},()=>Array(N).fill(E));
     b[2][2]=W;b[2][3]=B;b[3][2]=B;b[3][3]=W;
     let p=B;
     for(const [r,c] of coords){
-      const f=flipsFor(b,r,c,p); if(!f.length) return;
+      const f=flipsFor(b,r,c,p);if(!f.length)return;
       openingBook.set(boardSig(b,p),[r,c]);
-      b=applyMove(b,{r,c,f},p); p=-p;
+      b=applyMove(b,{r,c,f},p);p=-p;
       if(!legalMoves(b,p).length&&legalMoves(b,-p).length)p=-p;
     }
   }
-  // D5 -> E3 -> D2（ユーザー確認済み最善ライン）
-  addBookLine([[4,3],[2,4],[1,3]]);
+  // 確認済みライン
+  addBookLine([[4,3],[2,4],[1,3],[4,2],[2,1]]); // D5→E3→D2→C5→B3
 
   function bookMove(){
-    // 8対称を調べ、ブック局面なら元座標へ戻す
-    for(let t=0;t<8;t++){
+    const exact=openingBook.get(boardSig(board,turn));
+    if(exact){
+      const f=flipsFor(board,exact[0],exact[1],turn);
+      if(f.length)return {r:exact[0],c:exact[1],f};
+    }
+    for(let t=1;t<8;t++){
       const tb=transformedBoard(board,t), hit=openingBook.get(boardSig(tb,turn));
-      if(hit){
-        // hit を逆変換。8種なので総当たりで安全に戻す。
-        for(let r=0;r<N;r++)for(let c=0;c<N;c++){
-          const [rr,cc]=symRC(r,c,t);
-          if(rr===hit[0]&&cc===hit[1]){
-            const f=flipsFor(board,r,c,turn);
-            if(f.length)return {r,c,f};
-          }
+      if(!hit)continue;
+      for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+        const [rr,cc]=symRC(r,c,t);
+        if(rr===hit[0]&&cc===hit[1]){
+          const f=flipsFor(board,r,c,turn);
+          if(f.length)return {r,c,f};
         }
       }
     }
@@ -283,32 +389,37 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   function bestMove(){
     const moves=legalMoves(board,turn);
     if(!moves.length)return null;
+
     const bm=bookMove();
     if(bm)return bm;
-    if(plyCount===0&&turn===B){
-      const d5=moves.find(m=>m.r===4&&m.c===3);
-      if(d5)return d5;
-    }
-    let best=moves[0],bestV=-Infinity;
-    for(const m of moves){
-      const v=oracleLikeMoveValue(m,turn);
-      if(v>bestV){bestV=v;best=m}
+
+    let best=moves[0], bestV=turn===B?-INF:INF;
+    for(const m of orderedMovesStrong(board,moves,turn,null)){
+      const v=rawMoveBlackValue(m,turn);
+      if((turn===B&&v>bestV)||(turn===W&&v<bestV)){
+        bestV=v;best=m;
+      }
     }
     return best;
   }
 
   function boardStrengthForBlack(){
-    // 上部%は候補評価よりも緩やかに動かす。序盤の石数差はほぼ無視。
-    if(plyCount===0)return 55;
-    TT.clear();
-    let raw=negamax(board,B,Math.min(5,depthForPosition(board)),-Infinity,Infinity);
+    if(plyCount===0)return 45;
+    SEARCH_TT.clear();
+    const d=Math.min(searchDepthFor(board),8);
+    const raw=pvsBlack(board,turn,d,-INF,INF);
+
+    if(Math.abs(raw)>=1000){
+      const diff=raw/1000;
+      return Math.max(2,Math.min(98,Math.round(50+diff*2.2)));
+    }
+
     const e=empties(board);
-    const damp=e>24?0.35:e>16?0.5:0.75;
-    let pct=Math.round(55 + Math.tanh(raw/55)*18*damp);
-    // 1〜2手で極端に飛ばないよう制限
-    const earlyCap=plyCount<=2?8:plyCount<=6?15:28;
-    pct=Math.max(55-earlyCap,Math.min(55+earlyCap,pct));
-    return Math.max(5,Math.min(95,pct));
+    const sensitivity=e>26?70:e>20?55:e>14?42:30;
+    let pct=Math.round(50+32*Math.tanh(raw/sensitivity));
+    const cap=plyCount<=2?10:plyCount<=6?18:plyCount<=10?25:42;
+    pct=Math.max(50-cap,Math.min(50+cap,pct));
+    return Math.max(2,Math.min(98,pct));
   }
 
   function save(){history.push({board:board.map(r=>r.slice()),turn,lastMove:lastMove&&{...lastMove},plyCount,gameOver})}
@@ -338,8 +449,8 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     const moves=legalMoves(board,W);if(!moves.length){afterMove();return}
     busy=true;render();
     setTimeout(()=>{
-      let best=moves[0],bestV=-Infinity;
-      for(const m of moves){const v=oracleLikeMoveValue(m,W);if(v>bestV){bestV=v;best=m}}
+      let best=moves[0],bestV=INF;
+      for(const m of moves){const v=rawMoveBlackValue(m,W);if(v<bestV){bestV=v;best=m}}
       save();board=applyMove(board,best,W);lastMove={r:best.r,c:best.c,p:W};plyCount++;turn=B;busy=false;afterMove();
     },120);
   }
@@ -368,7 +479,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
       if(showRecommend&&recommendedKey===k)cell.classList.add('recommended');
       if(board[r][c]===B)cell.innerHTML='<span class="stone b"></span>';
       else if(board[r][c]===W)cell.innerHTML='<span class="stone w"></span>';
-      else if(m&&showEval){const v=oracleLikeMoveValue(m,turn);cell.innerHTML=`<span class="eval-num">${v>0?'+':''}${v}</span>`}
+      else if(m&&showEval){const v=displayMoveValue(m,turn);cell.innerHTML=`<span class="eval-num">${v>0?'+':''}${v}</span>`}
       cell.onclick=()=>doMove(r,c);$('board').appendChild(cell);
     }
     const b=count(board,B),w=count(board,W),bp=boardStrengthForBlack();
