@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#f3f3f6">
-<title>6×6 リバーシ</title>
+<title>6×6 リバーシ - 先攻強化版</title>
 <!-- 後攻AI: local 6x6-reversi-oracle (worker + WASM), no external fetch -->
 <!-- 6x6 AI v3: PVS/置換表/ムーブオーダリング/終盤完全読みを独自実装。yaskodama/othello6x6 (MIT) の設計資料を参考。 -->
 <style>
@@ -121,6 +121,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   let board,turn,history,lastMove,plyCount,autoWhite=false,showRecommend=true,recommendedKey=null,busy=false,gameOver=false;
   let oracleMoves=[];
   let oracleWorker=null,oracleReady=false,oracleStarting=null,oraclePending=[];
+  let oracleBlackKey=null,oracleBlackMove=null,oracleBlackValue=null;
   const TT=new Map();
   const MOVE_CACHE=new Map();
   let searchDeadline=0,searchNodes=0;
@@ -438,11 +439,10 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     return oracleStarting;
   }
 
-  async function oracleWhiteMove(){
+  async function oracleRequest(seq){
     const ok=await startOracle();
     if(!ok||!oracleWorker)throw new Error('Oracle unavailable');
-    const seq=oracleMoves.slice();
-    const key=JSON.stringify(seq);
+    const moves=seq.slice(),key=JSON.stringify(moves);
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{
         const i=oraclePending.findIndex(x=>x.key===key);
@@ -450,8 +450,40 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
         reject(new Error('Oracle response timeout'));
       },30000);
       oraclePending.push({key,resolve,timer});
-      oracleWorker.postMessage(seq);
+      oracleWorker.postMessage(moves);
     });
+  }
+  async function oracleBlackBest(){
+    if(turn!==B||gameOver||busy)return null;
+    const key=JSON.stringify(oracleMoves);
+    if(oracleBlackKey===key&&oracleBlackMove)return oracleBlackMove;
+    const raw=await oracleRequest(oracleMoves);
+    if(!(raw&&typeof raw==='object'))return null;
+    const a=Array.from(raw);
+    let best=null,bestValue=-Infinity;
+    for(let i=0;i+1<a.length;i+=2){
+      const idx=a[i],value=a[i+1];
+      if(idx<0)break;
+      const r=Math.floor(idx/6),c=idx%6,f=flipsFor(board,r,c,B);
+      if(f.length&&value>bestValue){bestValue=value;best={r,c,f}}
+    }
+    if(best){oracleBlackKey=key;oracleBlackMove=best;oracleBlackValue=bestValue}
+    return best;
+  }
+  async function refreshOracleBlackRecommendation(){
+    if(turn!==B||gameOver||busy||!showRecommend)return;
+    const key=JSON.stringify(oracleMoves);
+    try{
+      const m=await oracleBlackBest();
+      if(turn===B&&!gameOver&&!busy&&showRecommend&&JSON.stringify(oracleMoves)===key&&m){
+        recommendedKey=m.r+','+m.c;
+        render(false);
+      }
+    }catch(err){console.warn('Black Oracle analysis unavailable',err)}
+  }
+
+  async function oracleWhiteMove(){
+    return oracleRequest(oracleMoves);
   }
 
   function oracleIndexToMove(idx,p=W){
@@ -465,13 +497,13 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   function init(){
     board=Array.from({length:N},()=>Array(N).fill(E));
     board[2][2]=W;board[2][3]=B;board[3][2]=B;board[3][3]=W;
-    turn=B;history=[];lastMove=null;plyCount=0;busy=false;gameOver=false;recommendedKey=null;oracleMoves=[];
+    turn=B;history=[];lastMove=null;plyCount=0;busy=false;gameOver=false;recommendedKey=null;oracleMoves=[];oracleBlackKey=null;oracleBlackMove=null;oracleBlackValue=null;
     $('result').classList.remove('show');render();startOracle();
   }
   function doMove(r,c){
     if(busy||gameOver||(turn===W&&autoWhite))return;
     const f=flipsFor(board,r,c,turn);if(!f.length)return;
-    save();oracleMoves.push(r*6+c);board=applyMove(board,{r,c,f},turn);lastMove={r,c,p:turn};plyCount++;turn=-turn;afterMove();
+    save();oracleBlackKey=null;oracleBlackMove=null;oracleMoves.push(r*6+c);board=applyMove(board,{r,c,f},turn);lastMove={r,c,p:turn};plyCount++;turn=-turn;afterMove();
   }
   function afterMove(){
     let moves=legalMoves(board,turn);
@@ -515,10 +547,10 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   }
   function undo(){
     if(!history.length||busy)return;
-    const s=history.pop();board=s.board.map(r=>r.slice());turn=s.turn;lastMove=s.lastMove;plyCount=s.plyCount;gameOver=s.gameOver;oracleMoves=(s.oracleMoves||[]).slice();
+    const s=history.pop();board=s.board.map(r=>r.slice());turn=s.turn;lastMove=s.lastMove;plyCount=s.plyCount;gameOver=s.gameOver;oracleMoves=(s.oracleMoves||[]).slice();oracleBlackKey=null;oracleBlackMove=null;
     $('result').classList.toggle('show',gameOver);render();
   }
-  function render(){
+  function render(triggerOracle=true){
     const moves=gameOver||busy?[]:legalMoves(board,turn);
     const map=new Map(moves.map(m=>[m.r+','+m.c,m]));
 
@@ -562,6 +594,9 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
       gameOver?'ゲーム終了。結果を確認してください。':
       busy?'白（後攻・必勝Oracle）が考えています…':
       (turn===B?'黒（先攻）':'白（後攻）')+'の番です。 ★が最善手です。'+(onPerfectLine()?' 解析済み進行。':'');
+    if(triggerOracle&&turn===B&&!gameOver&&!busy&&showRecommend){
+      setTimeout(refreshOracleBlackRecommendation,0);
+    }
   }
 
   $('manualBtn').onclick=()=>{
