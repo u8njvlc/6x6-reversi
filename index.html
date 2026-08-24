@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#f3f3f6">
 <title>6×6 リバーシ</title>
+<!-- 後攻AI: local 6x6-reversi-oracle (worker + WASM), no external fetch -->
 <!-- 6x6 AI v3: PVS/置換表/ムーブオーダリング/終盤完全読みを独自実装。yaskodama/othello6x6 (MIT) の設計資料を参考。 -->
 <style>
 :root{
@@ -389,49 +390,74 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     return false;
   }
 
-  // White uses the published 6x6-reversi-oracle perfect player.
-  const ORACLE_WORKER_URL='https://raw.githubusercontent.com/mame/6x6-reversi-oracle/refs/heads/main/docs/assets/o66.worker-BZ6snYwF.js';
-  const ORACLE_WASM_URL='https://raw.githubusercontent.com/mame/6x6-reversi-oracle/refs/heads/main/docs/assets/o66_bg-Czr1ZcfQ.wasm';
+  // White / second player: local 6x6-reversi-oracle.
+  // All Oracle files are served from this same GitHub Pages site.
+  const ORACLE_WORKER_URL='./oracle.worker.js';
+
+  function failOracle(message){
+    oracleReady=false;
+    busy=false;
+    console.error(message);
+    const status=$('status');
+    if(status)status.textContent='Oracleの読み込みに失敗しました。後攻AIは停止しています。';
+    render();
+  }
 
   async function startOracle(){
     if(oracleReady&&oracleWorker)return true;
     if(oracleStarting)return oracleStarting;
     oracleStarting=(async()=>{
       try{
-        const res=await fetch(ORACLE_WORKER_URL,{cache:'force-cache'});
-        if(!res.ok)throw new Error('Oracle worker '+res.status);
-        let src=await res.text();
-        src=src.replace('"o66_bg-Czr1ZcfQ.wasm"',JSON.stringify(ORACLE_WASM_URL));
-        const url=URL.createObjectURL(new Blob([src],{type:'text/javascript'}));
-        oracleWorker=new Worker(url,{type:'module'});
+        oracleWorker=new Worker(ORACLE_WORKER_URL,{type:'module'});
         oracleWorker.onmessage=e=>{
           const data=e.data;
           if(!Array.isArray(data)||data.length<2)return;
           const key=JSON.stringify(data[0]);
           const i=oraclePending.findIndex(x=>x.key===key);
-          if(i>=0){const q=oraclePending.splice(i,1)[0];clearTimeout(q.timer);q.resolve(data[1]);}
+          if(i>=0){
+            const q=oraclePending.splice(i,1)[0];
+            clearTimeout(q.timer);
+            q.resolve(data[1]);
+          }
         };
-        oracleWorker.onerror=()=>{oracleReady=false};
-        await new Promise(r=>setTimeout(r,350));
-        oracleReady=true;return true;
+        oracleWorker.onerror=e=>{
+          failOracle(e?.message||'Oracle worker error');
+        };
+        // Official worker initializes its WASM on startup.
+        await new Promise(r=>setTimeout(r,400));
+        oracleReady=true;
+        return true;
       }catch(err){
-        console.warn('Oracle unavailable; local-search fallback.',err);
-        oracleReady=false;oracleWorker=null;return false;
-      }finally{oracleStarting=null}
+        failOracle(err);
+        oracleWorker=null;
+        return false;
+      }finally{
+        oracleStarting=null;
+      }
     })();
     return oracleStarting;
   }
+
   async function oracleWhiteMove(){
-    const ok=await startOracle();if(!ok||!oracleWorker)return null;
-    const seq=oracleMoves.slice(),key=JSON.stringify(seq);
-    return new Promise(resolve=>{
-      const timer=setTimeout(()=>{const i=oraclePending.findIndex(x=>x.key===key);if(i>=0)oraclePending.splice(i,1);resolve(null)},20000);
-      oraclePending.push({key,resolve,timer});oracleWorker.postMessage(seq);
+    const ok=await startOracle();
+    if(!ok||!oracleWorker)throw new Error('Oracle unavailable');
+    const seq=oracleMoves.slice();
+    const key=JSON.stringify(seq);
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{
+        const i=oraclePending.findIndex(x=>x.key===key);
+        if(i>=0)oraclePending.splice(i,1);
+        reject(new Error('Oracle response timeout'));
+      },30000);
+      oraclePending.push({key,resolve,timer});
+      oracleWorker.postMessage(seq);
     });
   }
+
   function oracleIndexToMove(idx,p=W){
     if(!Number.isInteger(idx)||idx<0||idx>=36)return null;
-    const r=Math.floor(idx/6),c=idx%6,f=flipsFor(board,r,c,p);
+    const r=Math.floor(idx/6),c=idx%6;
+    const f=flipsFor(board,r,c,p);
     return f.length?{r,c,f}:null;
   }
 
@@ -459,14 +485,26 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   }
   function aiMove(){
     if(gameOver||turn!==W||!autoWhite)return;
-    const moves=legalMoves(board,W);if(!moves.length){afterMove();return}
-    busy=true;render();
+    const moves=legalMoves(board,W);
+    if(!moves.length){afterMove();return}
+    busy=true;
+    render();
     setTimeout(async()=>{
-      let best=null;
-      try{best=oracleIndexToMove(await oracleWhiteMove(),W)}catch(err){console.warn(err)}
-      if(!best)best=bestMove(true)||moves[0];
-      save();oracleMoves.push(best.r*6+best.c);
-      board=applyMove(board,best,W);lastMove={r:best.r,c:best.c,p:W};plyCount++;turn=B;busy=false;afterMove();
+      try{
+        const idx=await oracleWhiteMove();
+        const best=oracleIndexToMove(idx,W);
+        if(!best)throw new Error('Oracle returned an illegal move: '+idx);
+        save();
+        oracleMoves.push(best.r*6+best.c);
+        board=applyMove(board,best,W);
+        lastMove={r:best.r,c:best.c,p:W};
+        plyCount++;
+        turn=B;
+        busy=false;
+        afterMove();
+      }catch(err){
+        failOracle(err);
+      }
     },80);
   }
   function finish(){
