@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#f3f3f6">
-<title>6×6 リバーシ - Strong AI v1</title>
-<!-- AI強化: 6x6完全解析ソルバ(yaskodama/othello6x6, MIT)の探索設計を参考。コードは本HTML向けに独自実装。 -->
+<title>6×6 リバーシ</title>
+<!-- 6x6 AI v2: PVS/置換表/ムーブオーダリング/終盤完全読みを独自実装。yaskodama/othello6x6 (MIT) の設計資料を参考。 -->
 <style>
 :root{
   --purple:#5147c7; --bg:#f3f3f6; --panel:#fff; --text:#17171b; --muted:#676772;
@@ -108,10 +108,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   </section>
 
   <section class="status" id="statusLine">黒（先攻）の番です。 黄色いマスが置ける場所です。</section>
-  <section id="resetConfirm" class="confirm">
-    <b>本当に最初からやり直しますか？</b>
-    <div class="buttons"><button id="cancelReset" class="cancel">キャンセル</button><button id="doReset" class="danger">最初から</button></div>
-  </section>
+
   <section id="result" class="result"></section>
 </div>
 
@@ -122,6 +119,9 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   const $=id=>document.getElementById(id);
   let board,turn,history,lastMove,plyCount,autoWhite=false,showRecommend=true,recommendedKey=null,busy=false,gameOver=false;
   const TT=new Map();
+  const MOVE_CACHE=new Map();
+  let searchDeadline=0,searchNodes=0;
+  const TIMEOUT={};
 
   const inside=(r,c)=>r>=0&&r<N&&c>=0&&c<N;
   function flipsFor(b,r,c,p){
@@ -140,16 +140,16 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   function applyMove(b,m,p){const n=b.map(r=>r.slice());n[m.r][m.c]=p;for(const[r,c]of m.f)n[r][c]=p;return n}
   function count(b,p){let n=0;for(const row of b)for(const x of row)if(x===p)n++;return n}
   function empties(b){return 36-count(b,B)-count(b,W)}
-  function key(b,p,d){return b.flat().map(x=>x===B?'1':x===W?'2':'0').join('')+'|'+p+'|'+d}
+  function boardKey(b,p){return b.flat().map(x=>x===B?'1':x===W?'2':'0').join('')+'|'+p}
 
   function featureEval(b,p){
     const pos=[
-      [60,-22,9,9,-22,60],
-      [-22,-34,-5,-5,-34,-22],
-      [9,-5,4,4,-5,9],
-      [9,-5,4,4,-5,9],
-      [-22,-34,-5,-5,-34,-22],
-      [60,-22,9,9,-22,60]
+      [120,-38,18,18,-38,120],
+      [-38,-52,-10,-10,-52,-38],
+      [18,-10,7,7,-10,18],
+      [18,-10,7,7,-10,18],
+      [-38,-52,-10,-10,-52,-38],
+      [120,-38,18,18,-38,120]
     ];
     let positional=0,frontierP=0,frontierO=0;
     for(let r=0;r<N;r++)for(let c=0;c<N;c++){
@@ -162,69 +162,114 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
       }
     }
     const my=legalMoves(b,p).length,op=legalMoves(b,-p).length;
-    const mobility=(my-op)*10;
-    const frontier=(frontierO-frontierP)*3;
-    const disc=(count(b,p)-count(b,-p))*0.35;
+    const e=empties(b);
+    const mobility=(my-op)*(e>20?16:e>12?13:9);
+    const frontier=(frontierO-frontierP)*(e>16?5:3);
+    const discs=count(b,p)-count(b,-p);
+    // 序中盤は石数を重くしすぎない。終盤だけ石差を効かせる。
+    const disc=discs*(e>20?0.15:e>12?0.45:1.5);
     return positional+mobility+frontier+disc;
   }
 
-  function orderMoves(moves){
-    const score=m=>{
-      let s=m.f.length*3;
-      if((m.r===0||m.r===5)&&(m.c===0||m.c===5))s+=1000;
-      if((m.r===1||m.r===4)&&(m.c===1||m.c===4))s-=180;
-      if((m.r===0||m.r===5)&&(m.c===1||m.c===4))s-=45;
-      if((m.c===0||m.c===5)&&(m.r===1||m.r===4))s-=45;
-      return s;
-    };
-    return moves.slice().sort((a,b)=>score(b)-score(a));
+  function moveOrderScore(b,m,p){
+    let s=m.f.length*2;
+    const corner=(m.r===0||m.r===5)&&(m.c===0||m.c===5);
+    if(corner)s+=100000;
+    if((m.r===1||m.r===4)&&(m.c===1||m.c===4))s-=12000;
+    if((m.r===0||m.r===5)&&(m.c===1||m.c===4))s-=2500;
+    if((m.c===0||m.c===5)&&(m.r===1||m.r===4))s-=2500;
+    const nb=applyMove(b,m,p);
+    s-=legalMoves(nb,-p).length*180; // 相手の可動性を減らす手を先に読む
+    // 相手に角を渡す手は大幅減点
+    for(const om of legalMoves(nb,-p))if((om.r===0||om.r===5)&&(om.c===0||om.c===5))s-=30000;
+    return s;
+  }
+  function orderMoves(b,moves,p,ttMove){
+    return moves.slice().sort((a,bm)=>{
+      const aa=(ttMove&&a.r===ttMove.r&&a.c===ttMove.c?1000000:0)+moveOrderScore(b,a,p);
+      const bb=(ttMove&&bm.r===ttMove.r&&bm.c===ttMove.c?1000000:0)+moveOrderScore(b,bm,p);
+      return bb-aa;
+    });
   }
 
-  function negamax(b,p,depth,alpha,beta){
-    const k=key(b,p,depth);
-    if(TT.has(k))return TT.get(k);
-    const moves=legalMoves(b,p),opp=legalMoves(b,-p);
-    if(!moves.length&&!opp.length){
-      const v=(count(b,p)-count(b,-p))*1000;
-      TT.set(k,v);return v;
-    }
-    if(depth<=0){const v=featureEval(b,p);TT.set(k,v);return v}
-    if(!moves.length)return -negamax(b,-p,depth-1,-beta,-alpha);
+  function checkTime(){
+    if((++searchNodes&2047)===0 && searchDeadline && performance.now()>searchDeadline)throw TIMEOUT;
+  }
 
-    // カットオフ値を「厳密値」としてTTに保存しない。
-    // 旧版はここが原因で別の探索窓から誤った値を再利用する可能性があった。
-    let best=-Infinity,cut=false;
-    for(const m of orderMoves(moves)){
-      const v=-negamax(applyMove(b,m,p),-p,depth-1,-beta,-alpha);
-      if(v>best)best=v;
-      if(best>alpha)alpha=best;
-      if(alpha>=beta){cut=true;break}
+  function negamax(b,p,depth,alpha,beta,passed=false){
+    checkTime();
+    const alpha0=alpha,beta0=beta,k=boardKey(b,p);
+    const hit=TT.get(k);
+    if(hit&&hit.depth>=depth){
+      if(hit.flag===0)return hit.value;
+      if(hit.flag===1)alpha=Math.max(alpha,hit.value);
+      else if(hit.flag===2)beta=Math.min(beta,hit.value);
+      if(alpha>=beta)return hit.value;
     }
-    if(!cut)TT.set(k,best);
+    const moves=legalMoves(b,p);
+    if(!moves.length){
+      if(passed){
+        const diff=count(b,p)-count(b,-p);
+        return diff*10000;
+      }
+      return -negamax(b,-p,depth,-beta,-alpha,true);
+    }
+    if(depth<=0)return featureEval(b,p);
+
+    let best=-Infinity,bestMoveLocal=null,first=true;
+    const ordered=orderMoves(b,moves,p,hit&&hit.move);
+    for(const m of ordered){
+      const nb=applyMove(b,m,p);
+      let v;
+      // PVS: 2手目以降はまず null-window、必要時だけ再探索。
+      if(first){
+        v=-negamax(nb,-p,depth-1,-beta,-alpha,false);
+        first=false;
+      }else{
+        v=-negamax(nb,-p,depth-1,-alpha-1,-alpha,false);
+        if(v>alpha&&v<beta)v=-negamax(nb,-p,depth-1,-beta,-alpha,false);
+      }
+      if(v>best){best=v;bestMoveLocal={r:m.r,c:m.c}}
+      if(v>alpha)alpha=v;
+      if(alpha>=beta)break;
+    }
+    const flag=best<=alpha0?2:best>=beta0?1:0; // 0 exact, 1 lower, 2 upper
+    TT.set(k,{depth,value:best,flag,move:bestMoveLocal});
     return best;
   }
 
-  function depthForPosition(b,strong=false){
-    const e=empties(b);
-    // 終盤は最後まで読む。パス分の余裕として +2。
-    if(e<=14)return e+2;
-    if(strong){
-      if(e<=18)return 10;
-      if(e<=24)return 8;
-      return 7;
-    }
-    if(e<=18)return 7;
-    if(e<=24)return 6;
-    return 5;
+  function searchOneMove(b,m,p,depth){
+    return -negamax(applyMove(b,m,p),-p,depth-1,-Infinity,Infinity,false);
   }
 
-  function oracleLikeMoveValue(m,p,strong=false){
+  function chooseBySearch(b,p,timeMs,strong=false){
+    const moves=legalMoves(b,p); if(!moves.length)return null;
+    const e=empties(b);
+    const cacheKey=boardKey(b,p)+'|'+(strong?'S':'N');
+    const cached=MOVE_CACHE.get(cacheKey);
+    if(cached){
+      const cm=moves.find(m=>m.r===cached.r&&m.c===cached.c);if(cm)return cm;
+    }
+    searchDeadline=performance.now()+timeMs; searchNodes=0;
     TT.clear();
-    const nb=applyMove(board,m,p);
-    const d=depthForPosition(nb,strong)-1;
-    const raw=-negamax(nb,-p,d,-Infinity,Infinity);
-    // 手の比較では圧縮せず、生の探索値を使う。
-    return raw;
+    let best=orderMoves(b,moves,p,null)[0],completedDepth=0;
+    // 終盤は可能なら完全読み。時間切れなら最後に完了した深さの手を返す。
+    const target=(e<=16)?e+2:(strong?Math.min(12,e+2):Math.min(9,e+2));
+    const start=strong?6:5;
+    try{
+      for(let d=Math.min(start,target);d<=target;d++){
+        let localBest=best,localV=-Infinity;
+        const rootOrder=orderMoves(b,moves,p,{r:best.r,c:best.c});
+        for(const m of rootOrder){
+          const v=searchOneMove(b,m,p,d);
+          if(v>localV){localV=v;localBest=m}
+        }
+        best=localBest;completedDepth=d;
+      }
+    }catch(err){if(err!==TIMEOUT)throw err}
+    searchDeadline=0;
+    if(completedDepth>0)MOVE_CACHE.set(cacheKey,{r:best.r,c:best.c,depth:completedDepth});
+    return best;
   }
 
   // 元サイト寄りの序盤ブック。
@@ -290,33 +335,18 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   function bestMove(strong=false){
     const moves=legalMoves(board,turn);
     if(!moves.length)return null;
-    // 解析済みブックに一致する局面は探索より優先。
     const bm=bookMove();
     if(bm)return bm;
     if(plyCount===0&&turn===B){
       const d5=moves.find(m=>m.r===4&&m.c===3);
       if(d5)return d5;
     }
-    let best=moves[0],bestV=-Infinity;
-    for(const m of orderMoves(moves)){
-      const v=oracleLikeMoveValue(m,turn,strong);
-      if(v>bestV){bestV=v;best=m}
-    }
-    return best;
+    // 表示用は短め、自動白AIは時間を多く使う。強さ優先。
+    return chooseBySearch(board,turn,strong?4200:650,strong);
   }
 
   function boardStrengthForBlack(){
-    // 上部%は候補評価よりも緩やかに動かす。序盤の石数差はほぼ無視。
-    if(plyCount===0)return 55;
-    TT.clear();
-    let raw=negamax(board,B,Math.min(5,depthForPosition(board)),-Infinity,Infinity);
-    const e=empties(board);
-    const damp=e>24?0.35:e>16?0.5:0.75;
-    let pct=Math.round(55 + Math.tanh(raw/55)*18*damp);
-    // 1〜2手で極端に飛ばないよう制限
-    const earlyCap=plyCount<=2?8:plyCount<=6?15:28;
-    pct=Math.max(55-earlyCap,Math.min(55+earlyCap,pct));
-    return Math.max(5,Math.min(95,pct));
+    return 50;
   }
 
   function onPerfectLine(){
@@ -332,7 +362,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     board=Array.from({length:N},()=>Array(N).fill(E));
     board[2][2]=W;board[2][3]=B;board[3][2]=B;board[3][3]=W;
     turn=B;history=[];lastMove=null;plyCount=0;busy=false;gameOver=false;recommendedKey=null;
-    $('result').classList.remove('show');$('resetConfirm').classList.remove('show');render();
+    $('result').classList.remove('show');render();
   }
   function doMove(r,c){
     if(busy||gameOver||(turn===W&&autoWhite))return;
@@ -413,7 +443,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     $('statusLine').textContent=
       gameOver?'ゲーム終了。結果を確認してください。':
       busy?'白（後攻）が考えています…':
-      (turn===B?'黒（先攻）':'白（後攻）')+'の番です。 ★が最善手です。'+(onPerfectLine()?' 最善進行中。':'');
+      (turn===B?'黒（先攻）':'白（後攻）')+'の番です。 ★が最善手です。'+(onPerfectLine()?' 解析済み進行。':'');
   }
 
   $('manualBtn').onclick=()=>{
@@ -438,9 +468,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   };
 
   $('undoBtn').onclick=undo;
-  $('resetBtn').onclick=()=>$('resetConfirm').classList.add('show');
-  $('cancelReset').onclick=()=>$('resetConfirm').classList.remove('show');
-  $('doReset').onclick=init;
+  $('resetBtn').onclick=init;
 
   // iPhone Safariのダブルタップ拡大を抑止
   let lastTouchEnd=0;
