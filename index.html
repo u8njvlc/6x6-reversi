@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#f3f3f6">
-<title>6×6 リバーシ</title>
+<title>6×6 リバーシ - Strong AI v1</title>
+<!-- AI強化: 6x6完全解析ソルバ(yaskodama/othello6x6, MIT)の探索設計を参考。コードは本HTML向けに独自実装。 -->
 <style>
 :root{
   --purple:#5147c7; --bg:#f3f3f6; --panel:#fff; --text:#17171b; --muted:#676772;
@@ -189,40 +190,41 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     }
     if(depth<=0){const v=featureEval(b,p);TT.set(k,v);return v}
     if(!moves.length)return -negamax(b,-p,depth-1,-beta,-alpha);
-    let best=-Infinity;
+
+    // カットオフ値を「厳密値」としてTTに保存しない。
+    // 旧版はここが原因で別の探索窓から誤った値を再利用する可能性があった。
+    let best=-Infinity,cut=false;
     for(const m of orderMoves(moves)){
       const v=-negamax(applyMove(b,m,p),-p,depth-1,-beta,-alpha);
-      if(v>best)best=v;if(best>alpha)alpha=best;if(alpha>=beta)break;
+      if(v>best)best=v;
+      if(best>alpha)alpha=best;
+      if(alpha>=beta){cut=true;break}
     }
-    TT.set(k,best);return best;
+    if(!cut)TT.set(k,best);
+    return best;
   }
 
-  function depthForPosition(b){
+  function depthForPosition(b,strong=false){
     const e=empties(b);
-    if(e<=10)return e+1;
-    if(e<=16)return 6;
-    if(e<=24)return 5;
-    return 4;
+    // 終盤は最後まで読む。パス分の余裕として +2。
+    if(e<=14)return e+2;
+    if(strong){
+      if(e<=18)return 10;
+      if(e<=24)return 8;
+      return 7;
+    }
+    if(e<=18)return 7;
+    if(e<=24)return 6;
+    return 5;
   }
 
-  function oracleLikeMoveValue(m,p){
-    if(plyCount===0 && count(board,B)===2 && count(board,W)===2)return -4;
-    const bk=bookMove();
-    if(bk && bk.r===m.r && bk.c===m.c){
-      TT.clear();
-      const nb=applyMove(board,m,p);
-      const raw=-negamax(nb,-p,depthForPosition(nb)-1,-Infinity,Infinity);
-      let v=Math.round(raw/7);
-      if(empties(nb)>24)v=Math.round(v*0.65);
-      return Math.max(-40,Math.min(40,v));
-    }
+  function oracleLikeMoveValue(m,p,strong=false){
     TT.clear();
     const nb=applyMove(board,m,p);
-    const raw=-negamax(nb,-p,depthForPosition(nb)-1,-Infinity,Infinity);
-    // 元サイトの序盤評価に近い幅へ圧縮
-    let v=Math.round(raw/6);
-    if(empties(nb)>24)v=Math.round(v*0.72);
-    return Math.max(-40,Math.min(40,v));
+    const d=depthForPosition(nb,strong)-1;
+    const raw=-negamax(nb,-p,d,-Infinity,Infinity);
+    // 手の比較では圧縮せず、生の探索値を使う。
+    return raw;
   }
 
   // 元サイト寄りの序盤ブック。
@@ -285,9 +287,10 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     return null;
   }
 
-  function bestMove(){
+  function bestMove(strong=false){
     const moves=legalMoves(board,turn);
     if(!moves.length)return null;
+    // 解析済みブックに一致する局面は探索より優先。
     const bm=bookMove();
     if(bm)return bm;
     if(plyCount===0&&turn===B){
@@ -295,8 +298,8 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
       if(d5)return d5;
     }
     let best=moves[0],bestV=-Infinity;
-    for(const m of moves){
-      const v=oracleLikeMoveValue(m,turn);
+    for(const m of orderMoves(moves)){
+      const v=oracleLikeMoveValue(m,turn,strong);
       if(v>bestV){bestV=v;best=m}
     }
     return best;
@@ -351,10 +354,10 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     const moves=legalMoves(board,W);if(!moves.length){afterMove();return}
     busy=true;render();
     setTimeout(()=>{
-      let best=moves[0],bestV=-Infinity;
-      for(const m of moves){const v=oracleLikeMoveValue(m,W);if(v>bestV){bestV=v;best=m}}
+      // 自動AIも「最善手表示」と同じブックを使い、その後はより深く探索する。
+      const best=bestMove(true) || moves[0];
       save();board=applyMove(board,best,W);lastMove={r:best.r,c:best.c,p:W};plyCount++;turn=B;busy=false;afterMove();
-    },120);
+    },80);
   }
   function finish(){
     gameOver=true;busy=false;render();
