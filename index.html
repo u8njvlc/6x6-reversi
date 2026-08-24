@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#f3f3f6">
 <title>6×6 リバーシ</title>
-<!-- 6x6 AI v2: PVS/置換表/ムーブオーダリング/終盤完全読みを独自実装。yaskodama/othello6x6 (MIT) の設計資料を参考。 -->
+<!-- 6x6 AI v3: PVS/置換表/ムーブオーダリング/終盤完全読みを独自実装。yaskodama/othello6x6 (MIT) の設計資料を参考。 -->
 <style>
 :root{
   --purple:#5147c7; --bg:#f3f3f6; --panel:#fff; --text:#17171b; --muted:#676772;
@@ -118,6 +118,8 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   const DIR=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
   const $=id=>document.getElementById(id);
   let board,turn,history,lastMove,plyCount,autoWhite=false,showRecommend=true,recommendedKey=null,busy=false,gameOver=false;
+  let oracleMoves=[];
+  let oracleWorker=null,oracleReady=false,oracleStarting=null,oraclePending=[];
   const TT=new Map();
   const MOVE_CACHE=new Map();
   let searchDeadline=0,searchNodes=0;
@@ -165,10 +167,40 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     const e=empties(b);
     const mobility=(my-op)*(e>20?16:e>12?13:9);
     const frontier=(frontierO-frontierP)*(e>16?5:3);
+
+    // 潜在可動性：次に手を作りやすい空きマスを評価。
+    let potentialP=0,potentialO=0;
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++)if(b[r][c]===E){
+      let adjOpp=false,adjMe=false;
+      for(const[dr,dc]of DIR){
+        const rr=r+dr,cc=c+dc;
+        if(!inside(rr,cc))continue;
+        if(b[rr][cc]===-p)adjOpp=true;
+        else if(b[rr][cc]===p)adjMe=true;
+      }
+      if(adjOpp)potentialP++;
+      if(adjMe)potentialO++;
+    }
+    const potential=(potentialP-potentialO)*(e>16?3:1);
+
+    // 角を取った後までX/C打ちを強く罰し続けないよう動的補正。
+    let cornerAdj=0;
+    for(const [r,c] of [[0,0],[0,5],[5,0],[5,5]]){
+      const owner=b[r][c];
+      if(owner===E)continue;
+      const sr=r===0?1:-1, sc=c===0?1:-1;
+      for(const [rr,cc] of [[r+sr,c],[r,c+sc],[r+sr,c+sc]]){
+        const x=b[rr][cc];
+        if(x===p)cornerAdj+=(owner===p?24:-8);
+        else if(x===-p)cornerAdj-=(owner===-p?24:-8);
+      }
+    }
+
     const discs=count(b,p)-count(b,-p);
     // 序中盤は石数を重くしすぎない。終盤だけ石差を効かせる。
     const disc=discs*(e>20?0.15:e>12?0.45:1.5);
-    return positional+mobility+frontier+disc;
+    const parity=e<=14?(e%2?3:-3):0;
+    return positional+mobility+frontier+potential+cornerAdj+parity+disc;
   }
 
   function moveOrderScore(b,m,p){
@@ -357,24 +389,70 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     return false;
   }
 
-  function save(){history.push({board:board.map(r=>r.slice()),turn,lastMove:lastMove&&{...lastMove},plyCount,gameOver})}
+  // White uses the published 6x6-reversi-oracle perfect player.
+  const ORACLE_WORKER_URL='https://raw.githubusercontent.com/mame/6x6-reversi-oracle/refs/heads/main/docs/assets/o66.worker-BZ6snYwF.js';
+  const ORACLE_WASM_URL='https://raw.githubusercontent.com/mame/6x6-reversi-oracle/refs/heads/main/docs/assets/o66_bg-Czr1ZcfQ.wasm';
+
+  async function startOracle(){
+    if(oracleReady&&oracleWorker)return true;
+    if(oracleStarting)return oracleStarting;
+    oracleStarting=(async()=>{
+      try{
+        const res=await fetch(ORACLE_WORKER_URL,{cache:'force-cache'});
+        if(!res.ok)throw new Error('Oracle worker '+res.status);
+        let src=await res.text();
+        src=src.replace('"o66_bg-Czr1ZcfQ.wasm"',JSON.stringify(ORACLE_WASM_URL));
+        const url=URL.createObjectURL(new Blob([src],{type:'text/javascript'}));
+        oracleWorker=new Worker(url,{type:'module'});
+        oracleWorker.onmessage=e=>{
+          const data=e.data;
+          if(!Array.isArray(data)||data.length<2)return;
+          const key=JSON.stringify(data[0]);
+          const i=oraclePending.findIndex(x=>x.key===key);
+          if(i>=0){const q=oraclePending.splice(i,1)[0];clearTimeout(q.timer);q.resolve(data[1]);}
+        };
+        oracleWorker.onerror=()=>{oracleReady=false};
+        await new Promise(r=>setTimeout(r,350));
+        oracleReady=true;return true;
+      }catch(err){
+        console.warn('Oracle unavailable; local-search fallback.',err);
+        oracleReady=false;oracleWorker=null;return false;
+      }finally{oracleStarting=null}
+    })();
+    return oracleStarting;
+  }
+  async function oracleWhiteMove(){
+    const ok=await startOracle();if(!ok||!oracleWorker)return null;
+    const seq=oracleMoves.slice(),key=JSON.stringify(seq);
+    return new Promise(resolve=>{
+      const timer=setTimeout(()=>{const i=oraclePending.findIndex(x=>x.key===key);if(i>=0)oraclePending.splice(i,1);resolve(null)},20000);
+      oraclePending.push({key,resolve,timer});oracleWorker.postMessage(seq);
+    });
+  }
+  function oracleIndexToMove(idx,p=W){
+    if(!Number.isInteger(idx)||idx<0||idx>=36)return null;
+    const r=Math.floor(idx/6),c=idx%6,f=flipsFor(board,r,c,p);
+    return f.length?{r,c,f}:null;
+  }
+
+  function save(){history.push({board:board.map(r=>r.slice()),turn,lastMove:lastMove&&{...lastMove},plyCount,gameOver,oracleMoves:oracleMoves.slice()})}
   function init(){
     board=Array.from({length:N},()=>Array(N).fill(E));
     board[2][2]=W;board[2][3]=B;board[3][2]=B;board[3][3]=W;
-    turn=B;history=[];lastMove=null;plyCount=0;busy=false;gameOver=false;recommendedKey=null;
-    $('result').classList.remove('show');render();
+    turn=B;history=[];lastMove=null;plyCount=0;busy=false;gameOver=false;recommendedKey=null;oracleMoves=[];
+    $('result').classList.remove('show');render();startOracle();
   }
   function doMove(r,c){
     if(busy||gameOver||(turn===W&&autoWhite))return;
     const f=flipsFor(board,r,c,turn);if(!f.length)return;
-    save();board=applyMove(board,{r,c,f},turn);lastMove={r,c,p:turn};plyCount++;turn=-turn;afterMove();
+    save();oracleMoves.push(r*6+c);board=applyMove(board,{r,c,f},turn);lastMove={r,c,p:turn};plyCount++;turn=-turn;afterMove();
   }
   function afterMove(){
     let moves=legalMoves(board,turn);
     if(!moves.length){
       const other=legalMoves(board,-turn);
       if(!other.length){finish();return}
-      turn=-turn;
+      oracleMoves.push(-1);turn=-turn;
     }
     render();
     if(!gameOver&&turn===W&&autoWhite)setTimeout(aiMove,120);
@@ -383,10 +461,12 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     if(gameOver||turn!==W||!autoWhite)return;
     const moves=legalMoves(board,W);if(!moves.length){afterMove();return}
     busy=true;render();
-    setTimeout(()=>{
-      // 自動AIも「最善手表示」と同じブックを使い、その後はより深く探索する。
-      const best=bestMove(true) || moves[0];
-      save();board=applyMove(board,best,W);lastMove={r:best.r,c:best.c,p:W};plyCount++;turn=B;busy=false;afterMove();
+    setTimeout(async()=>{
+      let best=null;
+      try{best=oracleIndexToMove(await oracleWhiteMove(),W)}catch(err){console.warn(err)}
+      if(!best)best=bestMove(true)||moves[0];
+      save();oracleMoves.push(best.r*6+best.c);
+      board=applyMove(board,best,W);lastMove={r:best.r,c:best.c,p:W};plyCount++;turn=B;busy=false;afterMove();
     },80);
   }
   function finish(){
@@ -397,7 +477,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   }
   function undo(){
     if(!history.length||busy)return;
-    const s=history.pop();board=s.board.map(r=>r.slice());turn=s.turn;lastMove=s.lastMove;plyCount=s.plyCount;gameOver=s.gameOver;
+    const s=history.pop();board=s.board.map(r=>r.slice());turn=s.turn;lastMove=s.lastMove;plyCount=s.plyCount;gameOver=s.gameOver;oracleMoves=(s.oracleMoves||[]).slice();
     $('result').classList.toggle('show',gameOver);render();
   }
   function render(){
@@ -442,7 +522,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
 
     $('statusLine').textContent=
       gameOver?'ゲーム終了。結果を確認してください。':
-      busy?'白（後攻）が考えています…':
+      busy?'白（後攻・必勝Oracle）が考えています…':
       (turn===B?'黒（先攻）':'白（後攻）')+'の番です。 ★が最善手です。'+(onPerfectLine()?' 解析済み進行。':'');
   }
 
