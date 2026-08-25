@@ -230,7 +230,8 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   }
 
   function checkTime(){
-    if((++searchNodes&2047)===0 && searchDeadline && performance.now()>searchDeadline)throw TIMEOUT;
+    // iPhoneでも期限超過を小さく抑えるため、細かい間隔で時計を確認する。
+    if((++searchNodes&255)===0 && searchDeadline && performance.now()>searchDeadline)throw TIMEOUT;
   }
 
   function negamax(b,p,depth,alpha,beta,passed=false){
@@ -372,13 +373,23 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
   function bestMove(strong=false){
     const moves=legalMoves(board,turn);
     if(!moves.length)return null;
+    if(turn===B){
+      const learned=BLACK_LOSS_BOOK[JSON.stringify(oracleMoves)];
+      if(Number.isInteger(learned)){
+        const r=Math.floor(learned/6),c=learned%6;
+        const m=moves.find(x=>x.r===r&&x.c===c);
+        if(m)return m;
+      }
+    }
     const bm=bookMove();
     if(bm)return bm;
     if(plyCount===0&&turn===B){
       const d5=moves.find(m=>m.r===4&&m.c===3);
       if(d5)return d5;
     }
-    // 表示用は短め、自動白AIは時間を多く使う。強さ優先。
+    // 黒の未登録局面はoracleBlackBestで一度だけ時間制限探索する。
+    if(turn===B)return oracleBlackMove;
+    // 白の既存処理は変更しない。
     return chooseBySearch(board,turn,strong?4200:650,strong);
   }
 
@@ -490,29 +501,9 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
         return lm;
       }
     }
-    // 強化版: 白が定石から外れても現在の実着手列をOracleへ渡し、
-    // 黒の完全解析を先に試す。Oracleが使えない時だけローカルAIへ落とす。
-    try{
-      const raw=await oracleRequest(oracleMoves);
-      if(raw&&typeof raw==='object'){
-        const a=Array.from(raw);
-        let best=null,bestValue=-Infinity;
-        for(let i=0;i+1<a.length;i+=2){
-          const idx=a[i],value=a[i+1];
-          if(idx<0)break;
-          const r=Math.floor(idx/6),c=idx%6,f=flipsFor(board,r,c,B);
-          if(f.length&&value>bestValue){bestValue=value;best={r,c,f}}
-        }
-        if(best){
-          oracleBlackKey=key;oracleBlackMove=best;oracleBlackValue=bestValue;
-          return best;
-        }
-      }
-    }catch(err){
-      console.warn('Exact Oracle fallback unavailable; using local AI',err);
-    }
-
-    const local=chooseBySearch(board,B,3200,true);
+    // 黒専用: 3秒を越える可能性があるOracle待ちは行わず、
+    // 2.7秒の反復深化で探索する。残り16マス以下は時間内で完全読みを狙う。
+    const local=chooseBySearch(board,B,2700,true);
     if(local){
       oracleBlackKey=key;oracleBlackMove=local;oracleBlackValue=null;
       return local;
