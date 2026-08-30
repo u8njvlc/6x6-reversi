@@ -295,7 +295,7 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
     // 終盤は可能なら完全読み。時間切れなら最後に完了した深さの手を返す。
     // 軽量黒AI: 残り14マスから完全読み。序中盤は反復深化で時間を固定する。
     // 登録済みの検証局面は BLACK_LOSS_BOOK が先に即答するため精度を維持する。
-    const target=(e<=14)?e+2:(strong?Math.min(11,e+2):Math.min(9,e+2));
+    const target=(e<=16)?e+2:(strong?Math.min(11,e+2):Math.min(9,e+2));
     const start=strong?6:5;
     try{
       for(let d=Math.min(start,target);d<=target;d++){
@@ -521,9 +521,9 @@ body{padding:max(10px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-b
       return learned;
     }
     // 黒専用: 3秒を越える可能性があるOracle待ちは行わず、
-    // 2.7秒の反復深化で探索する。残り16マス以下は時間内で完全読みを狙う。
-    // 未登録局面だけ最大1.2秒読む（従来2.7秒）。
-    const local=chooseBySearch(board,B,1200,true);
+    // 未登録局面だけ2.7秒の反復深化で最大限読む。
+    // 残り16マス以下は時間内で完全読みを狙う。
+    const local=chooseBySearch(board,B,2700,true);
     if(local){
       oracleBlackKey=key;oracleBlackMove=local;oracleBlackValue=null;
       return local;
